@@ -177,6 +177,85 @@
       margin-bottom: 1rem;
       display: none;
     }
+
+    .success-msg {
+      background: #eafaf1;
+      color: #1e8449;
+      border: 1px solid #a9dfbf;
+      padding: 0.6rem 1rem;
+      border-radius: 4px;
+      margin-bottom: 1rem;
+      display: none;
+    }
+
+    .book-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .book-toolbar h1 { margin-bottom: 0; }
+
+    .book-toolbar button {
+      padding: 0.35rem 0.75rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .book-toolbar button:hover { background: #ecf0f1; }
+
+    .book-toolbar .btn-save {
+      background: #2980b9;
+      color: #fff;
+      border-color: #2980b9;
+    }
+
+    .book-toolbar .btn-save:hover { background: #2472a4; }
+
+    .book-toolbar .btn-save:disabled {
+      background: #a0c4e0;
+      border-color: #a0c4e0;
+      cursor: default;
+    }
+
+    .book-toolbar .btn-cancel {
+      background: #e74c3c;
+      color: #fff;
+      border-color: #e74c3c;
+    }
+
+    .book-toolbar .btn-cancel:hover { background: #c0392b; }
+
+    .book-detail input[type="text"] {
+      width: 100%;
+      padding: 0.35rem 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 0.95rem;
+      font-family: inherit;
+    }
+
+    .book-detail select {
+      padding: 0.35rem 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 0.95rem;
+      font-family: inherit;
+    }
+
+    .info-msg {
+      background: #ebf5fb;
+      color: #2471a3;
+      border: 1px solid #aed6f1;
+      padding: 0.6rem 1rem;
+      border-radius: 4px;
+      margin-bottom: 1rem;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -191,7 +270,15 @@
       <p>Select a stack from the sidebar to view its books.</p>
     </div>
     <div id="book-view">
-      <h1 id="book-title"></h1>
+      <div class="book-toolbar">
+        <h1 id="book-title"></h1>
+        <button id="btn-book-edit">Edit</button>
+        <button id="btn-book-save" class="btn-save" style="display:none">Save</button>
+        <button id="btn-book-cancel" class="btn-cancel" style="display:none">Cancel</button>
+      </div>
+      <div id="book-error-msg" class="error-msg"></div>
+      <div id="book-success-msg" class="success-msg"></div>
+      <div id="book-info-msg" class="info-msg"></div>
       <div class="book-detail">
         <dl id="book-detail-dl"></dl>
       </div>
@@ -232,6 +319,12 @@
     const btnSave = document.getElementById("btn-save");
     const btnCancel = document.getElementById("btn-cancel");
     const errorMsg = document.getElementById("error-msg");
+    const btnBookEdit = document.getElementById("btn-book-edit");
+    const btnBookSave = document.getElementById("btn-book-save");
+    const btnBookCancel = document.getElementById("btn-book-cancel");
+    const bookErrorMsg = document.getElementById("book-error-msg");
+    const bookSuccessMsg = document.getElementById("book-success-msg");
+    const bookInfoMsg = document.getElementById("book-info-msg");
 
     let stacksCache = null;
     let currentStackId = null;
@@ -239,6 +332,9 @@
     let editMode = false;
     let orderChanged = false;
     let dragRow = null;
+    let currentBook = null;
+    let bookEditMode = false;
+    let successTimer = null;
 
     function showView(name) {
       welcome.style.display = name === "welcome" ? "block" : "none";
@@ -441,31 +537,25 @@
       showView("stack");
     }
 
-    async function showBook(bookId) {
-      await loadStacks();
-      highlightSidebar(null);
-
-      const res = await fetch("/api/book/" + bookId);
-      if (!res.ok) { showView("welcome"); return; }
-      const book = await res.json();
-
+    function renderBookDetail(book) {
       const stack = stacksCache.find(s => s.id === book.stack_id);
       const stackLabel = stack ? stack.name : String(book.stack_id);
 
       bookTitle.textContent = book.title;
       bookDetailDl.innerHTML = "";
 
-      const fields = [
-        ["Title", book.title],
-        ["Author", book.author || "\u2014"],
-        ["Publisher", book.publisher || "\u2014"],
+      const editableFields = [
+        ["Title", "title", book.title],
+        ["Author", "author", book.author || ""],
+        ["Publisher", "publisher", book.publisher || ""],
       ];
 
-      fields.forEach(([label, value]) => {
+      editableFields.forEach(([label, key, value]) => {
         const dt = document.createElement("dt");
         dt.textContent = label;
         const dd = document.createElement("dd");
-        dd.textContent = value;
+        dd.dataset.field = key;
+        dd.textContent = value || "\u2014";
         bookDetailDl.appendChild(dt);
         bookDetailDl.appendChild(dd);
       });
@@ -473,6 +563,7 @@
       const stackDt = document.createElement("dt");
       stackDt.textContent = "Stack";
       const stackDd = document.createElement("dd");
+      stackDd.dataset.field = "stack";
       const stackLink = document.createElement("a");
       stackLink.href = "/stacks/" + book.stack_id;
       stackLink.textContent = stackLabel;
@@ -487,10 +578,135 @@
       const posDt = document.createElement("dt");
       posDt.textContent = "Position";
       const posDd = document.createElement("dd");
+      posDd.dataset.field = "position";
       posDd.textContent = book.position;
       bookDetailDl.appendChild(posDt);
       bookDetailDl.appendChild(posDd);
+    }
 
+    function enterBookEditMode() {
+      bookEditMode = true;
+      btnBookEdit.style.display = "none";
+      btnBookSave.style.display = "";
+      btnBookCancel.style.display = "";
+      bookErrorMsg.style.display = "none";
+      bookSuccessMsg.style.display = "none";
+      bookInfoMsg.style.display = "none";
+      if (successTimer) { clearTimeout(successTimer); successTimer = null; }
+
+      ["title", "author", "publisher"].forEach(key => {
+        const dd = bookDetailDl.querySelector('dd[data-field="' + key + '"]');
+        if (!dd) return;
+        const val = key === "title" ? currentBook.title :
+                    key === "author" ? (currentBook.author || "") :
+                    (currentBook.publisher || "");
+        const input = document.createElement("input");
+        input.type = "text";
+        input.name = key;
+        input.value = val;
+        dd.textContent = "";
+        dd.appendChild(input);
+      });
+
+      // Stack dropdown
+      const stackDd = bookDetailDl.querySelector('dd[data-field="stack"]');
+      if (stackDd) {
+        stackDd.innerHTML = "";
+        const select = document.createElement("select");
+        select.name = "stack_id";
+        stacksCache.forEach(s => {
+          const opt = document.createElement("option");
+          opt.value = s.id;
+          opt.textContent = s.name;
+          if (s.id === currentBook.stack_id) opt.selected = true;
+          select.appendChild(opt);
+        });
+        select.addEventListener("change", () => {
+          const newId = Number(select.value);
+          if (newId !== currentBook.stack_id) {
+            const newStack = stacksCache.find(s => s.id === newId);
+            const name = newStack ? newStack.name : newId;
+            bookInfoMsg.textContent = "Book will be placed at the top (position 0) of Stack " + name + ".";
+            bookInfoMsg.style.display = "block";
+          } else {
+            bookInfoMsg.style.display = "none";
+          }
+        });
+        stackDd.appendChild(select);
+      }
+    }
+
+    function exitBookEditMode() {
+      bookEditMode = false;
+      btnBookEdit.style.display = "";
+      btnBookSave.style.display = "none";
+      btnBookCancel.style.display = "none";
+      bookErrorMsg.style.display = "none";
+      bookInfoMsg.style.display = "none";
+    }
+
+    async function saveBook() {
+      bookErrorMsg.style.display = "none";
+      btnBookSave.disabled = true;
+
+      const title = bookDetailDl.querySelector('dd[data-field="title"] input').value;
+      const author = bookDetailDl.querySelector('dd[data-field="author"] input').value;
+      const publisher = bookDetailDl.querySelector('dd[data-field="publisher"] input').value;
+      const stackSelect = bookDetailDl.querySelector('dd[data-field="stack"] select');
+      const stackId = stackSelect ? Number(stackSelect.value) : currentBook.stack_id;
+
+      try {
+        const res = await fetch("/api/book/" + currentBook.id, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: title,
+            author: author || null,
+            publisher: publisher || null,
+            stack_id: stackId,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "Failed to save");
+        }
+
+        currentBook = await res.json();
+        exitBookEditMode();
+        renderBookDetail(currentBook);
+
+        bookSuccessMsg.textContent = "Book updated successfully.";
+        bookSuccessMsg.style.display = "block";
+        successTimer = setTimeout(() => {
+          bookSuccessMsg.style.display = "none";
+        }, 3000);
+      } catch (e) {
+        bookErrorMsg.textContent = e.message;
+        bookErrorMsg.style.display = "block";
+      } finally {
+        btnBookSave.disabled = false;
+      }
+    }
+
+    btnBookEdit.addEventListener("click", enterBookEditMode);
+    btnBookCancel.addEventListener("click", () => {
+      exitBookEditMode();
+      renderBookDetail(currentBook);
+    });
+    btnBookSave.addEventListener("click", saveBook);
+
+    async function showBook(bookId) {
+      await loadStacks();
+      highlightSidebar(null);
+      exitBookEditMode();
+      bookSuccessMsg.style.display = "none";
+
+      const res = await fetch("/api/book/" + bookId);
+      if (!res.ok) { showView("welcome"); return; }
+      currentBook = await res.json();
+
+      renderBookDetail(currentBook);
       showView("book");
     }
 
