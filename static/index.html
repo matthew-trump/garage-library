@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Garage Library</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      height: 100vh;
+      color: #333;
+    }
+
+    #sidebar {
+      width: 200px;
+      background: #2c3e50;
+      color: #ecf0f1;
+      padding: 1rem 0;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    #sidebar h2 {
+      padding: 0 1rem 0.75rem;
+      font-size: 1.1rem;
+      border-bottom: 1px solid #3d566e;
+      margin-bottom: 0.5rem;
+    }
+
+    #stack-list {
+      list-style: none;
+    }
+
+    #stack-list li {
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    #stack-list li:hover {
+      background: #3d566e;
+    }
+
+    #stack-list li.active {
+      background: #2980b9;
+      font-weight: 600;
+    }
+
+    #main {
+      flex: 1;
+      padding: 2rem;
+      overflow-y: auto;
+      background: #fafafa;
+    }
+
+    #main h1 {
+      margin-bottom: 1rem;
+      font-size: 1.5rem;
+    }
+
+    #welcome p {
+      color: #666;
+      line-height: 1.6;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    th, td {
+      text-align: left;
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid #eee;
+    }
+
+    th {
+      background: #ecf0f1;
+      font-weight: 600;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      color: #555;
+    }
+
+    td { font-size: 0.95rem; }
+
+    tr:hover td { background: #f5f8fa; }
+
+    td a { color: #2980b9; text-decoration: none; }
+    td a:hover { text-decoration: underline; }
+
+    #book-view { display: none; }
+
+    .book-detail {
+      background: #fff;
+      padding: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      max-width: 600px;
+    }
+
+    .book-detail dl {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      row-gap: 0.6rem;
+    }
+
+    .book-detail dt {
+      font-weight: 600;
+      color: #555;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+    }
+
+    .book-detail dd { margin: 0; }
+    .book-detail dd a { color: #2980b9; text-decoration: none; }
+    .book-detail dd a:hover { text-decoration: underline; }
+
+    .stack-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .stack-toolbar h1 { margin-bottom: 0; }
+
+    .stack-toolbar button {
+      padding: 0.35rem 0.75rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .stack-toolbar button:hover { background: #ecf0f1; }
+
+    .stack-toolbar .btn-save {
+      background: #2980b9;
+      color: #fff;
+      border-color: #2980b9;
+    }
+
+    .stack-toolbar .btn-save:hover { background: #2472a4; }
+
+    .stack-toolbar .btn-save:disabled {
+      background: #a0c4e0;
+      border-color: #a0c4e0;
+      cursor: default;
+    }
+
+    .stack-toolbar .btn-cancel {
+      background: #e74c3c;
+      color: #fff;
+      border-color: #e74c3c;
+    }
+
+    .stack-toolbar .btn-cancel:hover { background: #c0392b; }
+
+    .edit-mode tr { cursor: grab; }
+    .edit-mode tr.dragging { opacity: 0.4; }
+    .edit-mode tr.drag-over td { border-top: 2px solid #2980b9; }
+
+    .edit-mode td a { pointer-events: none; color: inherit; }
+
+    .error-msg {
+      background: #fdecea;
+      color: #c0392b;
+      border: 1px solid #e6b0aa;
+      padding: 0.6rem 1rem;
+      border-radius: 4px;
+      margin-bottom: 1rem;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <nav id="sidebar">
+    <h2>Stacks</h2>
+    <ul id="stack-list"></ul>
+  </nav>
+
+  <main id="main">
+    <div id="welcome">
+      <h1>Garage Library</h1>
+      <p>Select a stack from the sidebar to view its books.</p>
+    </div>
+    <div id="book-view">
+      <h1 id="book-title"></h1>
+      <div class="book-detail">
+        <dl id="book-detail-dl"></dl>
+      </div>
+    </div>
+    <div id="stack-view" style="display:none">
+      <div class="stack-toolbar">
+        <h1 id="stack-name"></h1>
+        <button id="btn-edit">Edit Order</button>
+        <button id="btn-save" class="btn-save" style="display:none" disabled>Save</button>
+        <button id="btn-cancel" class="btn-cancel" style="display:none">Cancel</button>
+      </div>
+      <div id="error-msg" class="error-msg"></div>
+      <table id="stack-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Title</th>
+            <th>Author</th>
+            <th>Publisher</th>
+          </tr>
+        </thead>
+        <tbody id="book-tbody"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    const stackList = document.getElementById("stack-list");
+    const welcome = document.getElementById("welcome");
+    const stackView = document.getElementById("stack-view");
+    const stackName = document.getElementById("stack-name");
+    const bookTbody = document.getElementById("book-tbody");
+    const bookView = document.getElementById("book-view");
+    const bookTitle = document.getElementById("book-title");
+    const bookDetailDl = document.getElementById("book-detail-dl");
+    const stackTable = document.getElementById("stack-table");
+    const btnEdit = document.getElementById("btn-edit");
+    const btnSave = document.getElementById("btn-save");
+    const btnCancel = document.getElementById("btn-cancel");
+    const errorMsg = document.getElementById("error-msg");
+
+    let stacksCache = null;
+    let currentStackId = null;
+    let currentBooks = [];
+    let editMode = false;
+    let orderChanged = false;
+    let dragRow = null;
+
+    function showView(name) {
+      welcome.style.display = name === "welcome" ? "block" : "none";
+      stackView.style.display = name === "stack" ? "block" : "none";
+      bookView.style.display = name === "book" ? "block" : "none";
+    }
+
+    function navigate(url) {
+      if (editMode) exitEditMode();
+      history.pushState(null, "", url);
+      route();
+    }
+
+    async function loadStacks() {
+      if (stacksCache) return stacksCache;
+      const res = await fetch("/api/stacks");
+      stacksCache = await res.json();
+      stackList.innerHTML = "";
+      stacksCache.forEach(s => {
+        const li = document.createElement("li");
+        li.textContent = "Stack " + s.name;
+        li.dataset.id = s.id;
+        li.addEventListener("click", (e) => {
+          e.preventDefault();
+          navigate("/stacks/" + s.id);
+        });
+        stackList.appendChild(li);
+      });
+      return stacksCache;
+    }
+
+    function highlightSidebar(stackId) {
+      document.querySelectorAll("#stack-list li").forEach(el => {
+        el.classList.toggle("active", el.dataset.id === String(stackId));
+      });
+    }
+
+    function renderBooks(books) {
+      bookTbody.innerHTML = "";
+      books.forEach((book, idx) => {
+        const tr = document.createElement("tr");
+        tr.dataset.bookId = book.id;
+        tr.draggable = false;
+
+        const posTd = document.createElement("td");
+        posTd.textContent = idx;
+        const titleTd = document.createElement("td");
+        const titleLink = document.createElement("a");
+        titleLink.href = "/book/" + book.id;
+        titleLink.textContent = book.title;
+        titleLink.addEventListener("click", (e) => {
+          e.preventDefault();
+          navigate("/book/" + book.id);
+        });
+        titleTd.appendChild(titleLink);
+        const authorTd = document.createElement("td");
+        authorTd.textContent = book.author || "\u2014";
+        const pubTd = document.createElement("td");
+        pubTd.textContent = book.publisher || "\u2014";
+
+        tr.appendChild(posTd);
+        tr.appendChild(titleTd);
+        tr.appendChild(authorTd);
+        tr.appendChild(pubTd);
+        bookTbody.appendChild(tr);
+      });
+    }
+
+    function enterEditMode() {
+      editMode = true;
+      orderChanged = false;
+      stackTable.classList.add("edit-mode");
+      btnEdit.style.display = "none";
+      btnSave.style.display = "";
+      btnCancel.style.display = "";
+      btnSave.disabled = true;
+      errorMsg.style.display = "none";
+
+      Array.from(bookTbody.rows).forEach(tr => {
+        tr.draggable = true;
+        tr.addEventListener("dragstart", onDragStart);
+        tr.addEventListener("dragover", onDragOver);
+        tr.addEventListener("dragleave", onDragLeave);
+        tr.addEventListener("drop", onDrop);
+        tr.addEventListener("dragend", onDragEnd);
+      });
+    }
+
+    function exitEditMode() {
+      editMode = false;
+      orderChanged = false;
+      stackTable.classList.remove("edit-mode");
+      btnEdit.style.display = "";
+      btnSave.style.display = "none";
+      btnCancel.style.display = "none";
+      errorMsg.style.display = "none";
+
+      Array.from(bookTbody.rows).forEach(tr => {
+        tr.draggable = false;
+      });
+    }
+
+    function onDragStart(e) {
+      dragRow = e.currentTarget;
+      dragRow.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+    }
+
+    function onDragOver(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const tr = e.currentTarget;
+      if (tr !== dragRow) tr.classList.add("drag-over");
+    }
+
+    function onDragLeave(e) {
+      e.currentTarget.classList.remove("drag-over");
+    }
+
+    function onDrop(e) {
+      e.preventDefault();
+      const target = e.currentTarget;
+      target.classList.remove("drag-over");
+      if (!dragRow || target === dragRow) return;
+
+      // Insert dragRow before or after target depending on position
+      const rows = Array.from(bookTbody.rows);
+      const dragIdx = rows.indexOf(dragRow);
+      const targetIdx = rows.indexOf(target);
+      if (dragIdx < targetIdx) {
+        bookTbody.insertBefore(dragRow, target.nextSibling);
+      } else {
+        bookTbody.insertBefore(dragRow, target);
+      }
+
+      // Renumber positions
+      Array.from(bookTbody.rows).forEach((tr, i) => {
+        tr.cells[0].textContent = i;
+      });
+
+      orderChanged = true;
+      btnSave.disabled = false;
+    }
+
+    function onDragEnd() {
+      if (dragRow) dragRow.classList.remove("dragging");
+      Array.from(bookTbody.rows).forEach(tr => tr.classList.remove("drag-over"));
+      dragRow = null;
+    }
+
+    async function saveOrder() {
+      const bookIds = Array.from(bookTbody.rows).map(tr => Number(tr.dataset.bookId));
+      errorMsg.style.display = "none";
+      btnSave.disabled = true;
+
+      try {
+        const res = await fetch("/api/stack/" + currentStackId, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ book_ids: bookIds }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "Failed to save");
+        }
+
+        const data = await res.json();
+        currentBooks = data.books;
+        exitEditMode();
+        renderBooks(currentBooks);
+      } catch (e) {
+        errorMsg.textContent = e.message;
+        errorMsg.style.display = "block";
+        btnSave.disabled = false;
+      }
+    }
+
+    btnEdit.addEventListener("click", enterEditMode);
+    btnCancel.addEventListener("click", () => {
+      exitEditMode();
+      renderBooks(currentBooks);
+    });
+    btnSave.addEventListener("click", saveOrder);
+
+    async function showStack(stackId) {
+      await loadStacks();
+      highlightSidebar(stackId);
+      exitEditMode();
+
+      const res = await fetch("/api/stack/" + stackId);
+      if (!res.ok) { showView("welcome"); return; }
+      const data = await res.json();
+
+      currentStackId = stackId;
+      currentBooks = data.books;
+
+      stackName.textContent = "Stack " + data.name;
+      renderBooks(currentBooks);
+      showView("stack");
+    }
+
+    async function showBook(bookId) {
+      await loadStacks();
+      highlightSidebar(null);
+
+      const res = await fetch("/api/book/" + bookId);
+      if (!res.ok) { showView("welcome"); return; }
+      const book = await res.json();
+
+      const stack = stacksCache.find(s => s.id === book.stack_id);
+      const stackLabel = stack ? stack.name : String(book.stack_id);
+
+      bookTitle.textContent = book.title;
+      bookDetailDl.innerHTML = "";
+
+      const fields = [
+        ["Title", book.title],
+        ["Author", book.author || "\u2014"],
+        ["Publisher", book.publisher || "\u2014"],
+      ];
+
+      fields.forEach(([label, value]) => {
+        const dt = document.createElement("dt");
+        dt.textContent = label;
+        const dd = document.createElement("dd");
+        dd.textContent = value;
+        bookDetailDl.appendChild(dt);
+        bookDetailDl.appendChild(dd);
+      });
+
+      const stackDt = document.createElement("dt");
+      stackDt.textContent = "Stack";
+      const stackDd = document.createElement("dd");
+      const stackLink = document.createElement("a");
+      stackLink.href = "/stacks/" + book.stack_id;
+      stackLink.textContent = stackLabel;
+      stackLink.addEventListener("click", (e) => {
+        e.preventDefault();
+        navigate("/stacks/" + book.stack_id);
+      });
+      stackDd.appendChild(stackLink);
+      bookDetailDl.appendChild(stackDt);
+      bookDetailDl.appendChild(stackDd);
+
+      const posDt = document.createElement("dt");
+      posDt.textContent = "Position";
+      const posDd = document.createElement("dd");
+      posDd.textContent = book.position;
+      bookDetailDl.appendChild(posDt);
+      bookDetailDl.appendChild(posDd);
+
+      showView("book");
+    }
+
+    async function route() {
+      const path = window.location.pathname;
+      let match;
+
+      if ((match = path.match(/^\/book\/(\d+)$/))) {
+        await showBook(match[1]);
+      } else if ((match = path.match(/^\/stacks\/(\d+)$/))) {
+        await showStack(match[1]);
+      } else {
+        await loadStacks();
+        highlightSidebar(null);
+        showView("welcome");
+      }
+    }
+
+    window.addEventListener("popstate", route);
+    route();
+  </script>
+</body>
+</html>
