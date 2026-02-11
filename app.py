@@ -1,11 +1,20 @@
+import os
+import re
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import bcrypt
+import jwt
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.routing import APIRouter
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-do-not-use-in-production")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_HOURS = 24
 
 DB_PATH = Path(__file__).parent / "garage-library.db"
 
@@ -18,6 +27,58 @@ def get_db() -> sqlite3.Connection:
     return conn
 
 
+def init_db():
+    conn = get_db()
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS user (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL
+        )"""
+    )
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+# --- JWT Helpers ---
+
+USERNAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*$")
+
+
+def create_token(user_id: int, username: str) -> str:
+    payload = {
+        "sub": user_id,
+        "username": username,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def validate_username(username: str) -> str:
+    if not (3 <= len(username) <= 24):
+        raise HTTPException(status_code=400, detail="Username must be 3-24 characters")
+    if not USERNAME_RE.match(username):
+        raise HTTPException(
+            status_code=400,
+            detail="Username must start with a letter and contain only letters, digits, and underscores",
+        )
+    return username.lower()
+
+
+def validate_password(password: str):
+    if not (8 <= len(password) <= 128):
+        raise HTTPException(status_code=400, detail="Password must be 8-128 characters")
+    if not re.search(r"[A-Z]", password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter")
+    if not re.search(r"[a-z]", password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one lowercase letter")
+    if not re.search(r"[0-9]", password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one digit")
+
+
 # --- Models ---
 
 class Book(BaseModel):
@@ -25,6 +86,7 @@ class Book(BaseModel):
     title: str
     author: str | None
     publisher: str | None
+    year: str | None
     stack_id: int
     position: int
 
@@ -42,15 +104,83 @@ class StackDetail(BaseModel):
     books: list[Book]
 
 
+class UserCreate(BaseModel):
+    username: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    token: str
+
+
 # --- API Routes ---
 
 api = APIRouter(prefix="/api")
 
 
+@api.post("/register", response_model=UserResponse, status_code=201)
+def register(body: UserCreate):
+    username = validate_username(body.username)
+    validate_password(body.password)
+
+    password_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
+
+    conn = get_db()
+    existing = conn.execute("SELECT id FROM user WHERE username = ?", (username,)).fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Username already taken")
+
+    try:
+        cur = conn.execute(
+            "INSERT INTO user (username, password_hash) VALUES (?, ?)",
+            (username, password_hash),
+        )
+        conn.commit()
+        user_id = cur.lastrowid
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    conn.close()
+    return {"id": user_id, "username": username}
+
+
+@api.post("/login", response_model=TokenResponse)
+def login(body: UserLogin):
+    username = body.username.strip().lower()
+
+    conn = get_db()
+    row = conn.execute(
+        "SELECT id, username, password_hash FROM user WHERE username = ?", (username,)
+    ).fetchone()
+    conn.close()
+
+    if row is None or not bcrypt.checkpw(body.password.encode(), row["password_hash"].encode()):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    token = create_token(row["id"], row["username"])
+    return {"token": token}
+
+
+
+
+
 @api.get("/books", response_model=list[Book])
 def list_books():
     conn = get_db()
-    rows = conn.execute("SELECT id, title, author, publisher, stack_id, position FROM book").fetchall()
+    rows = conn.execute("SELECT id, title, author, publisher, year, stack_id, position FROM book").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -60,6 +190,7 @@ class BookSearchResult(BaseModel):
     title: str
     author: str | None
     publisher: str | None
+    year: str | None
     stack_id: int
     stack_name: str
 
@@ -70,8 +201,9 @@ def search_books(
     title: bool = Query(True),
     author: bool = Query(True),
     publisher: bool = Query(False),
+    year: bool = Query(False),
 ):
-    if not (title or author or publisher):
+    if not (title or author or publisher or year):
         raise HTTPException(status_code=400, detail="At least one search field must be selected")
 
     conn = get_db()
@@ -86,10 +218,13 @@ def search_books(
     if publisher:
         conditions.append("b.publisher LIKE ?")
         params.append(f"%{q}%")
+    if year:
+        conditions.append("b.year LIKE ?")
+        params.append(f"%{q}%")
 
     where = " OR ".join(conditions)
     rows = conn.execute(
-        f"SELECT b.id, b.title, b.author, b.publisher, b.stack_id, s.name as stack_name "
+        f"SELECT b.id, b.title, b.author, b.publisher, b.year, b.stack_id, s.name as stack_name "
         f"FROM book b JOIN stack s ON b.stack_id = s.id "
         f"WHERE {where} ORDER BY b.title",
         params,
@@ -102,7 +237,7 @@ def search_books(
 def get_book(book_id: int):
     conn = get_db()
     row = conn.execute(
-        "SELECT id, title, author, publisher, stack_id, position FROM book WHERE id = ?",
+        "SELECT id, title, author, publisher, year, stack_id, position FROM book WHERE id = ?",
         (book_id,),
     ).fetchone()
     conn.close()
@@ -127,7 +262,7 @@ def get_stack(stack_id: int):
         conn.close()
         raise HTTPException(status_code=404, detail="Stack not found")
     books = conn.execute(
-        "SELECT id, title, author, publisher, stack_id, position FROM book WHERE stack_id = ? ORDER BY position",
+        "SELECT id, title, author, publisher, year, stack_id, position FROM book WHERE stack_id = ? ORDER BY position",
         (stack_id,),
     ).fetchall()
     conn.close()
@@ -170,6 +305,7 @@ class BookCreate(BaseModel):
     title: str
     author: str | None = None
     publisher: str | None = None
+    year: str | None = None
     stack_id: int
     position: str = "end"  # "beginning" or "end"
 
@@ -212,8 +348,8 @@ def create_book(body: BookCreate):
             new_pos = len(existing)
 
         cur = conn.execute(
-            "INSERT INTO book (title, author, publisher, stack_id, position) VALUES (?, ?, ?, ?, ?)",
-            (title, body.author, body.publisher, body.stack_id, new_pos),
+            "INSERT INTO book (title, author, publisher, year, stack_id, position) VALUES (?, ?, ?, ?, ?, ?)",
+            (title, body.author, body.publisher, body.year, body.stack_id, new_pos),
         )
         conn.commit()
         book_id = cur.lastrowid
@@ -223,7 +359,7 @@ def create_book(body: BookCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
     row = conn.execute(
-        "SELECT id, title, author, publisher, stack_id, position FROM book WHERE id = ?",
+        "SELECT id, title, author, publisher, year, stack_id, position FROM book WHERE id = ?",
         (book_id,),
     ).fetchone()
     conn.close()
@@ -234,6 +370,7 @@ class BookUpdate(BaseModel):
     title: str
     author: str | None = None
     publisher: str | None = None
+    year: str | None = None
     stack_id: int | None = None
 
 
@@ -307,13 +444,13 @@ def update_book(book_id: int, body: BookUpdate):
 
             # Place the book at position 0 with updated fields
             conn.execute(
-                "UPDATE book SET title = ?, author = ?, publisher = ?, position = 0 WHERE id = ?",
-                (body.title.strip(), body.author, body.publisher, book_id),
+                "UPDATE book SET title = ?, author = ?, publisher = ?, year = ?, position = 0 WHERE id = ?",
+                (body.title.strip(), body.author, body.publisher, body.year, book_id),
             )
         else:
             conn.execute(
-                "UPDATE book SET title = ?, author = ?, publisher = ? WHERE id = ?",
-                (body.title.strip(), body.author, body.publisher, book_id),
+                "UPDATE book SET title = ?, author = ?, publisher = ?, year = ? WHERE id = ?",
+                (body.title.strip(), body.author, body.publisher, body.year, book_id),
             )
         conn.commit()
     except Exception as e:
@@ -322,7 +459,7 @@ def update_book(book_id: int, body: BookUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
     updated = conn.execute(
-        "SELECT id, title, author, publisher, stack_id, position FROM book WHERE id = ?",
+        "SELECT id, title, author, publisher, year, stack_id, position FROM book WHERE id = ?",
         (book_id,),
     ).fetchone()
     conn.close()
@@ -409,7 +546,7 @@ def reorder_stack(stack_id: int, body: ReorderRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
     books = conn.execute(
-        "SELECT id, title, author, publisher, stack_id, position FROM book WHERE stack_id = ? ORDER BY position",
+        "SELECT id, title, author, publisher, year, stack_id, position FROM book WHERE stack_id = ? ORDER BY position",
         (stack_id,),
     ).fetchall()
     conn.close()

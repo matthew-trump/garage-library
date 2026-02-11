@@ -435,6 +435,60 @@
       gap: 0.3rem;
       cursor: pointer;
     }
+
+    #login-view { display: none; }
+    #logged-out-view { display: none; }
+
+    .login-form {
+      background: #fff;
+      padding: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      max-width: 360px;
+    }
+
+    .login-form .form-group input[type="password"] {
+      width: 100%;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 0.95rem;
+      font-family: inherit;
+    }
+
+    .logged-out-view {
+      text-align: center;
+      padding-top: 3rem;
+    }
+
+    .logged-out-view p {
+      color: #666;
+      margin: 0.75rem 0 1.5rem;
+    }
+
+    #navbar .nav-user {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 0.9rem;
+    }
+
+    #navbar .nav-user span {
+      color: #aed6f1;
+    }
+
+    #navbar .nav-user button {
+      background: transparent;
+      border: 1px solid #aed6f1;
+      color: #aed6f1;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+
+    #navbar .nav-user button:hover {
+      background: rgba(174,214,241,0.15);
+    }
   </style>
 </head>
 <body>
@@ -442,6 +496,11 @@
     <a href="/" id="navbar-home"><img id="navbar-logo" src="/static/logo.png" alt=""> Garage Library</a>
     <div class="nav-links">
       <a href="/search" id="navbar-search">Search</a>
+      <a href="/login" id="navbar-login">Login</a>
+      <span id="navbar-user" class="nav-user" style="display:none">
+        <span id="navbar-username"></span>
+        <button id="btn-logout">Logout</button>
+      </span>
     </div>
   </header>
   <div id="content">
@@ -466,6 +525,7 @@
         <label><input type="checkbox" id="search-title" checked> Title</label>
         <label><input type="checkbox" id="search-author" checked> Author</label>
         <label><input type="checkbox" id="search-publisher"> Publisher</label>
+        <label><input type="checkbox" id="search-year"> Year</label>
       </div>
       <div id="search-error" class="error-msg"></div>
       <p id="search-count" style="color:#666; margin-bottom:0.5rem; display:none;"></p>
@@ -475,6 +535,7 @@
             <th>Title</th>
             <th>Author</th>
             <th>Publisher</th>
+            <th>Year</th>
             <th>Stack</th>
           </tr>
         </thead>
@@ -509,6 +570,32 @@
       <div id="new-stack-followup" class="form-actions" style="display:none; margin-top:1rem;">
         <button id="btn-add-another">Add Another</button>
         <button id="btn-goto-stack">Go to Stack</button>
+      </div>
+    </div>
+    <div id="login-view">
+      <h1>Login</h1>
+      <div id="login-error" class="error-msg"></div>
+      <div class="login-form">
+        <div class="form-group">
+          <label for="login-username">Username</label>
+          <input type="text" id="login-username">
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password">
+        </div>
+        <div class="form-actions">
+          <button id="btn-login" class="btn-primary" disabled>Login</button>
+        </div>
+      </div>
+    </div>
+    <div id="logged-out-view">
+      <div class="logged-out-view">
+        <h1>You have been logged out</h1>
+        <p>Your session has ended.</p>
+        <div class="form-actions" style="justify-content:center;">
+          <button id="btn-goto-home" class="btn-primary">Go to Home</button>
+        </div>
       </div>
     </div>
     <div id="stack-view" style="display:none">
@@ -553,6 +640,10 @@
           <div class="form-group">
             <label for="add-book-publisher">Publisher</label>
             <input type="text" id="add-book-publisher">
+          </div>
+          <div class="form-group">
+            <label for="add-book-year">Year</label>
+            <input type="text" id="add-book-year">
           </div>
           <div class="form-group">
             <label for="add-book-position">Add at</label>
@@ -623,6 +714,45 @@
     let createdStackId = null;
 
     const searchView = document.getElementById("search-view");
+    const loginView = document.getElementById("login-view");
+    const loggedOutView = document.getElementById("logged-out-view");
+    const navbarLogin = document.getElementById("navbar-login");
+    const navbarUser = document.getElementById("navbar-user");
+    const navbarUsername = document.getElementById("navbar-username");
+    const loginUsername = document.getElementById("login-username");
+    const loginPassword = document.getElementById("login-password");
+    const btnLogin = document.getElementById("btn-login");
+    const loginError = document.getElementById("login-error");
+
+    // --- Auth helpers ---
+    function getToken() {
+      return localStorage.getItem("auth_token");
+    }
+
+    function getUser() {
+      const token = getToken();
+      if (!token) return null;
+      try {
+        const payload = token.split(".")[1];
+        const decoded = JSON.parse(atob(payload));
+        return { sub: decoded.sub, username: decoded.username };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function updateNavAuth() {
+      const user = getUser();
+      if (user) {
+        navbarLogin.style.display = "none";
+        navbarUser.style.display = "";
+        navbarUsername.textContent = user.username;
+      } else {
+        navbarLogin.style.display = "";
+        navbarUser.style.display = "none";
+        navbarUsername.textContent = "";
+      }
+    }
 
     function showView(name) {
       welcome.style.display = name === "welcome" ? "block" : "none";
@@ -630,6 +760,8 @@
       bookView.style.display = name === "book" ? "block" : "none";
       newStackView.style.display = name === "new-stack" ? "block" : "none";
       searchView.style.display = name === "search" ? "block" : "none";
+      loginView.style.display = name === "login" ? "block" : "none";
+      loggedOutView.style.display = name === "logged-out" ? "block" : "none";
     }
 
     function navigate(url) {
@@ -819,6 +951,7 @@
     const addBookTitle = document.getElementById("add-book-title");
     const addBookAuthor = document.getElementById("add-book-author");
     const addBookPublisher = document.getElementById("add-book-publisher");
+    const addBookYear = document.getElementById("add-book-year");
     const addBookPosition = document.getElementById("add-book-position");
     const btnSaveNewBook = document.getElementById("btn-save-new-book");
     const btnCancelNewBook = document.getElementById("btn-cancel-new-book");
@@ -830,9 +963,11 @@
       addBookTitle.value = "";
       addBookAuthor.value = "";
       addBookPublisher.value = "";
+      addBookYear.value = "";
       addBookTitle.disabled = false;
       addBookAuthor.disabled = false;
       addBookPublisher.disabled = false;
+      addBookYear.disabled = false;
       addBookPosition.value = "end";
       btnSaveNewBook.disabled = true;
       addBookError.style.display = "none";
@@ -875,6 +1010,7 @@
             title: addBookTitle.value.trim(),
             author: addBookAuthor.value.trim() || null,
             publisher: addBookPublisher.value.trim() || null,
+            year: addBookYear.value.trim() || null,
             stack_id: Number(currentStackId),
             position: addBookPosition.value,
           }),
@@ -1034,6 +1170,7 @@
         ["Title", "title", book.title],
         ["Author", "author", book.author || ""],
         ["Publisher", "publisher", book.publisher || ""],
+        ["Year", "year", book.year || ""],
       ];
 
       editableFields.forEach(([label, key, value]) => {
@@ -1074,14 +1211,16 @@
       const titleInput = bookDetailDl.querySelector('dd[data-field="title"] input');
       const authorInput = bookDetailDl.querySelector('dd[data-field="author"] input');
       const pubInput = bookDetailDl.querySelector('dd[data-field="publisher"] input');
+      const yearInput = bookDetailDl.querySelector('dd[data-field="year"] input');
       const stackSelect = bookDetailDl.querySelector('dd[data-field="stack"] select');
 
       const titleChanged = titleInput && titleInput.value !== currentBook.title;
       const authorChanged = authorInput && authorInput.value !== (currentBook.author || "");
       const pubChanged = pubInput && pubInput.value !== (currentBook.publisher || "");
+      const yearChanged = yearInput && yearInput.value !== (currentBook.year || "");
       const stackChanged = stackSelect && Number(stackSelect.value) !== currentBook.stack_id;
 
-      const changed = titleChanged || authorChanged || pubChanged || stackChanged;
+      const changed = titleChanged || authorChanged || pubChanged || yearChanged || stackChanged;
       btnBookSave.disabled = !changed;
     }
 
@@ -1097,12 +1236,13 @@
       bookInfoMsg.style.display = "none";
       if (successTimer) { clearTimeout(successTimer); successTimer = null; }
 
-      ["title", "author", "publisher"].forEach(key => {
+      ["title", "author", "publisher", "year"].forEach(key => {
         const dd = bookDetailDl.querySelector('dd[data-field="' + key + '"]');
         if (!dd) return;
         const val = key === "title" ? currentBook.title :
                     key === "author" ? (currentBook.author || "") :
-                    (currentBook.publisher || "");
+                    key === "publisher" ? (currentBook.publisher || "") :
+                    (currentBook.year || "");
         const input = document.createElement("input");
         input.type = "text";
         input.name = key;
@@ -1157,6 +1297,8 @@
       const title = bookDetailDl.querySelector('dd[data-field="title"] input').value;
       const author = bookDetailDl.querySelector('dd[data-field="author"] input').value;
       const publisher = bookDetailDl.querySelector('dd[data-field="publisher"] input').value;
+      const yearInput = bookDetailDl.querySelector('dd[data-field="year"] input');
+      const year = yearInput ? yearInput.value : "";
       const stackSelect = bookDetailDl.querySelector('dd[data-field="stack"] select');
       const stackId = stackSelect ? Number(stackSelect.value) : currentBook.stack_id;
 
@@ -1168,6 +1310,7 @@
             title: title,
             author: author || null,
             publisher: publisher || null,
+            year: year || null,
             stack_id: stackId,
           }),
         });
@@ -1289,6 +1432,7 @@
     const searchTitle = document.getElementById("search-title");
     const searchAuthor = document.getElementById("search-author");
     const searchPublisher = document.getElementById("search-publisher");
+    const searchYear = document.getElementById("search-year");
     const searchError = document.getElementById("search-error");
     const searchCount = document.getElementById("search-count");
     const searchResultsTable = document.getElementById("search-results-table");
@@ -1307,6 +1451,7 @@
       params.set("title", searchTitle.checked);
       params.set("author", searchAuthor.checked);
       params.set("publisher", searchPublisher.checked);
+      params.set("year", searchYear.checked);
 
       try {
         const res = await fetch("/api/books/search?" + params.toString());
@@ -1335,6 +1480,8 @@
           authorTd.textContent = book.author || "\u2014";
           const pubTd = document.createElement("td");
           pubTd.textContent = book.publisher || "\u2014";
+          const yearTd = document.createElement("td");
+          yearTd.textContent = book.year || "\u2014";
           const stackTd = document.createElement("td");
           const stackLink = document.createElement("a");
           stackLink.href = "/stacks/" + book.stack_id;
@@ -1348,6 +1495,7 @@
           tr.appendChild(titleTd);
           tr.appendChild(authorTd);
           tr.appendChild(pubTd);
+          tr.appendChild(yearTd);
           tr.appendChild(stackTd);
           searchResultsTbody.appendChild(tr);
         });
@@ -1375,6 +1523,65 @@
     document.getElementById("navbar-search").addEventListener("click", (e) => {
       e.preventDefault();
       navigate("/search");
+    });
+
+    // --- Login ---
+    function checkLoginEnabled() {
+      btnLogin.disabled = !(loginUsername.value.trim() && loginPassword.value);
+    }
+
+    loginUsername.addEventListener("input", checkLoginEnabled);
+    loginPassword.addEventListener("input", checkLoginEnabled);
+
+    loginPassword.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !btnLogin.disabled) btnLogin.click();
+    });
+
+    btnLogin.addEventListener("click", async () => {
+      loginError.style.display = "none";
+      btnLogin.disabled = true;
+
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: loginUsername.value.trim(),
+            password: loginPassword.value,
+          }),
+        });
+
+        if (!res.ok) {
+          throw new Error("Invalid username or password");
+        }
+
+        const data = await res.json();
+        localStorage.setItem("auth_token", data.token);
+        updateNavAuth();
+        loginUsername.value = "";
+        loginPassword.value = "";
+        navigate("/");
+      } catch (e) {
+        loginError.textContent = e.message;
+        loginError.style.display = "block";
+        checkLoginEnabled();
+      }
+    });
+
+    navbarLogin.addEventListener("click", (e) => {
+      e.preventDefault();
+      navigate("/login");
+    });
+
+    // --- Logout ---
+    document.getElementById("btn-logout").addEventListener("click", () => {
+      localStorage.removeItem("auth_token");
+      updateNavAuth();
+      navigate("/logged-out");
+    });
+
+    document.getElementById("btn-goto-home").addEventListener("click", () => {
+      navigate("/");
     });
 
     async function route() {
