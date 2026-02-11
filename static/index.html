@@ -10,8 +10,33 @@
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       display: flex;
+      flex-direction: column;
       height: 100vh;
       color: #333;
+    }
+
+    #navbar {
+      background: #1a252f;
+      color: #ecf0f1;
+      padding: 0.6rem 1.25rem;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+    }
+
+    #navbar a {
+      color: #ecf0f1;
+      text-decoration: none;
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+
+    #navbar a:hover { color: #aed6f1; }
+
+    #content {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
     }
 
     #sidebar {
@@ -160,7 +185,13 @@
       border-color: #e74c3c;
     }
 
-    .stack-toolbar .btn-cancel:hover { background: #c0392b; }
+    .stack-toolbar .btn-cancel:hover:not(:disabled) { background: #c0392b; }
+
+    .stack-toolbar .btn-cancel:disabled {
+      background: #f1a9a0;
+      border-color: #f1a9a0;
+      cursor: default;
+    }
 
     .edit-mode tr { cursor: grab; }
     .edit-mode tr.dragging { opacity: 0.4; }
@@ -228,7 +259,13 @@
       border-color: #e74c3c;
     }
 
-    .book-toolbar .btn-cancel:hover { background: #c0392b; }
+    .book-toolbar .btn-cancel:hover:not(:disabled) { background: #c0392b; }
+
+    .book-toolbar .btn-cancel:disabled {
+      background: #f1a9a0;
+      border-color: #f1a9a0;
+      cursor: default;
+    }
 
     .book-detail input[type="text"] {
       width: 100%;
@@ -256,12 +293,85 @@
       margin-bottom: 1rem;
       display: none;
     }
+
+    #new-stack-view { display: none; }
+
+    .form-group {
+      margin-bottom: 1rem;
+      max-width: 400px;
+    }
+
+    .form-group label {
+      display: block;
+      font-weight: 600;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      color: #555;
+      margin-bottom: 0.3rem;
+    }
+
+    .form-group input[type="text"] {
+      width: 100%;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 0.95rem;
+      font-family: inherit;
+    }
+
+    .form-actions {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+
+    .form-actions button {
+      padding: 0.4rem 0.85rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .form-actions .btn-primary {
+      background: #2980b9;
+      color: #fff;
+      border-color: #2980b9;
+    }
+
+    .form-actions .btn-primary:hover:not(:disabled) { background: #2472a4; }
+
+    .form-actions .btn-primary:disabled {
+      background: #a0c4e0;
+      border-color: #a0c4e0;
+      cursor: default;
+    }
+
+    .form-actions button:not(.btn-primary):hover { background: #ecf0f1; }
+
+    #sidebar-add-stack {
+      padding: 0.5rem 1rem;
+      margin-top: 0.25rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      border-top: 1px solid #3d566e;
+      font-size: 0.85rem;
+      color: #aed6f1;
+    }
+
+    #sidebar-add-stack:hover { background: #3d566e; }
   </style>
 </head>
 <body>
+  <header id="navbar">
+    <a href="/" id="navbar-home">Garage Library</a>
+  </header>
+  <div id="content">
   <nav id="sidebar">
     <h2>Stacks</h2>
     <ul id="stack-list"></ul>
+    <div id="sidebar-add-stack">+ New Stack</div>
   </nav>
 
   <main id="main">
@@ -283,6 +393,22 @@
         <dl id="book-detail-dl"></dl>
       </div>
     </div>
+    <div id="new-stack-view">
+      <h1>New Stack</h1>
+      <div id="new-stack-error" class="error-msg"></div>
+      <div class="form-group">
+        <label for="new-stack-name">Stack Name</label>
+        <input type="text" id="new-stack-name" placeholder="e.g. AB">
+      </div>
+      <div class="form-actions">
+        <button id="btn-create-stack" class="btn-primary" disabled>Create Stack</button>
+        <button id="btn-cancel-create">Cancel</button>
+      </div>
+      <div id="new-stack-followup" class="form-actions" style="display:none; margin-top:1rem;">
+        <button id="btn-add-another">Add Another</button>
+        <button id="btn-goto-stack">Go to Stack</button>
+      </div>
+    </div>
     <div id="stack-view" style="display:none">
       <div class="stack-toolbar">
         <h1 id="stack-name"></h1>
@@ -291,6 +417,36 @@
         <button id="btn-cancel" class="btn-cancel" style="display:none">Cancel</button>
       </div>
       <div id="error-msg" class="error-msg"></div>
+      <div id="add-book-area">
+        <button id="btn-add-book" style="margin-bottom:1rem;">+ Add Book</button>
+        <div id="add-book-success" class="success-msg" style="max-width:500px;"></div>
+        <div id="add-book-form" style="display:none; background:#fff; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,0.1); margin-bottom:1rem; max-width:500px;">
+          <div id="add-book-error" class="error-msg"></div>
+          <div class="form-group">
+            <label for="add-book-title">Title</label>
+            <input type="text" id="add-book-title">
+          </div>
+          <div class="form-group">
+            <label for="add-book-author">Author</label>
+            <input type="text" id="add-book-author">
+          </div>
+          <div class="form-group">
+            <label for="add-book-publisher">Publisher</label>
+            <input type="text" id="add-book-publisher">
+          </div>
+          <div class="form-group">
+            <label for="add-book-position">Add at</label>
+            <select id="add-book-position">
+              <option value="end" selected>End of stack</option>
+              <option value="beginning">Beginning of stack</option>
+            </select>
+          </div>
+          <div class="form-actions">
+            <button id="btn-save-new-book" class="btn-primary" disabled>Save</button>
+            <button id="btn-cancel-new-book">Cancel</button>
+          </div>
+        </div>
+      </div>
       <table id="stack-table">
         <thead>
           <tr>
@@ -304,6 +460,7 @@
       </table>
     </div>
   </main>
+  </div>
 
   <script>
     const stackList = document.getElementById("stack-list");
@@ -336,10 +493,20 @@
     let bookEditMode = false;
     let successTimer = null;
 
+    const newStackView = document.getElementById("new-stack-view");
+    const newStackName = document.getElementById("new-stack-name");
+    const newStackError = document.getElementById("new-stack-error");
+    const btnCreateStack = document.getElementById("btn-create-stack");
+    const newStackFollowup = document.getElementById("new-stack-followup");
+    const btnAddAnother = document.getElementById("btn-add-another");
+    const btnGotoStack = document.getElementById("btn-goto-stack");
+    let createdStackId = null;
+
     function showView(name) {
       welcome.style.display = name === "welcome" ? "block" : "none";
       stackView.style.display = name === "stack" ? "block" : "none";
       bookView.style.display = name === "book" ? "block" : "none";
+      newStackView.style.display = name === "new-stack" ? "block" : "none";
     }
 
     function navigate(url) {
@@ -352,6 +519,7 @@
       if (stacksCache) return stacksCache;
       const res = await fetch("/api/stacks");
       stacksCache = await res.json();
+      stacksCache.sort((a, b) => a.name.localeCompare(b.name));
       stackList.innerHTML = "";
       stacksCache.forEach(s => {
         const li = document.createElement("li");
@@ -411,6 +579,7 @@
       btnSave.style.display = "";
       btnCancel.style.display = "";
       btnSave.disabled = true;
+      btnCancel.disabled = false;
       errorMsg.style.display = "none";
 
       Array.from(bookTbody.rows).forEach(tr => {
@@ -477,6 +646,7 @@
 
       orderChanged = true;
       btnSave.disabled = false;
+      btnCancel.disabled = false;
     }
 
     function onDragEnd() {
@@ -520,10 +690,111 @@
     });
     btnSave.addEventListener("click", saveOrder);
 
+    // --- Add Book ---
+    const btnAddBook = document.getElementById("btn-add-book");
+    const addBookForm = document.getElementById("add-book-form");
+    const addBookTitle = document.getElementById("add-book-title");
+    const addBookAuthor = document.getElementById("add-book-author");
+    const addBookPublisher = document.getElementById("add-book-publisher");
+    const addBookPosition = document.getElementById("add-book-position");
+    const btnSaveNewBook = document.getElementById("btn-save-new-book");
+    const btnCancelNewBook = document.getElementById("btn-cancel-new-book");
+    const addBookError = document.getElementById("add-book-error");
+    const addBookSuccess = document.getElementById("add-book-success");
+    let addBookSuccessTimer = null;
+
+    function resetAddBookForm() {
+      addBookTitle.value = "";
+      addBookAuthor.value = "";
+      addBookPublisher.value = "";
+      addBookTitle.disabled = false;
+      addBookAuthor.disabled = false;
+      addBookPublisher.disabled = false;
+      addBookPosition.value = "end";
+      btnSaveNewBook.disabled = true;
+      addBookError.style.display = "none";
+      addBookSuccess.style.display = "none";
+      if (addBookSuccessTimer) { clearTimeout(addBookSuccessTimer); addBookSuccessTimer = null; }
+    }
+
+    function checkAddBookEnabled() {
+      const hasTitle = addBookTitle.value.trim() !== "";
+      const hasAuthor = addBookAuthor.value.trim() !== "";
+      btnSaveNewBook.disabled = !(hasTitle || hasAuthor);
+    }
+
+    btnAddBook.addEventListener("click", () => {
+      resetAddBookForm();
+      addBookForm.style.display = "block";
+      btnAddBook.style.display = "none";
+      addBookTitle.focus();
+    });
+
+    btnCancelNewBook.addEventListener("click", () => {
+      addBookForm.style.display = "none";
+      btnAddBook.style.display = "";
+      resetAddBookForm();
+    });
+
+    addBookTitle.addEventListener("input", checkAddBookEnabled);
+    addBookAuthor.addEventListener("input", checkAddBookEnabled);
+
+    btnSaveNewBook.addEventListener("click", async () => {
+      addBookError.style.display = "none";
+      addBookSuccess.style.display = "none";
+      btnSaveNewBook.disabled = true;
+
+      try {
+        const res = await fetch("/api/book", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: addBookTitle.value.trim(),
+            author: addBookAuthor.value.trim() || null,
+            publisher: addBookPublisher.value.trim() || null,
+            stack_id: Number(currentStackId),
+            position: addBookPosition.value,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "Failed to create book");
+        }
+
+        await res.json();
+
+        // Refresh the stack to show updated order
+        const stackRes = await fetch("/api/stack/" + currentStackId);
+        const stackData = await stackRes.json();
+        currentBooks = stackData.books;
+        renderBooks(currentBooks);
+
+        // Reset and hide form, show success
+        addBookForm.style.display = "none";
+        btnAddBook.style.display = "";
+        resetAddBookForm();
+
+        addBookSuccess.textContent = "Book added successfully.";
+        addBookSuccess.style.display = "block";
+        addBookForm.style.display = "none";
+        addBookSuccessTimer = setTimeout(() => {
+          addBookSuccess.style.display = "none";
+        }, 3000);
+      } catch (e) {
+        addBookError.textContent = e.message;
+        addBookError.style.display = "block";
+        checkAddBookEnabled();
+      }
+    });
+
     async function showStack(stackId) {
       await loadStacks();
       highlightSidebar(stackId);
       exitEditMode();
+      addBookForm.style.display = "none";
+      btnAddBook.style.display = "";
+      resetAddBookForm();
 
       const res = await fetch("/api/stack/" + stackId);
       if (!res.ok) { showView("welcome"); return; }
@@ -584,11 +855,28 @@
       bookDetailDl.appendChild(posDd);
     }
 
+    function checkBookChanged() {
+      const titleInput = bookDetailDl.querySelector('dd[data-field="title"] input');
+      const authorInput = bookDetailDl.querySelector('dd[data-field="author"] input');
+      const pubInput = bookDetailDl.querySelector('dd[data-field="publisher"] input');
+      const stackSelect = bookDetailDl.querySelector('dd[data-field="stack"] select');
+
+      const titleChanged = titleInput && titleInput.value !== currentBook.title;
+      const authorChanged = authorInput && authorInput.value !== (currentBook.author || "");
+      const pubChanged = pubInput && pubInput.value !== (currentBook.publisher || "");
+      const stackChanged = stackSelect && Number(stackSelect.value) !== currentBook.stack_id;
+
+      const changed = titleChanged || authorChanged || pubChanged || stackChanged;
+      btnBookSave.disabled = !changed;
+    }
+
     function enterBookEditMode() {
       bookEditMode = true;
       btnBookEdit.style.display = "none";
       btnBookSave.style.display = "";
       btnBookCancel.style.display = "";
+      btnBookSave.disabled = true;
+      btnBookCancel.disabled = false;
       bookErrorMsg.style.display = "none";
       bookSuccessMsg.style.display = "none";
       bookInfoMsg.style.display = "none";
@@ -604,6 +892,7 @@
         input.type = "text";
         input.name = key;
         input.value = val;
+        input.addEventListener("input", checkBookChanged);
         dd.textContent = "";
         dd.appendChild(input);
       });
@@ -631,6 +920,7 @@
           } else {
             bookInfoMsg.style.display = "none";
           }
+          checkBookChanged();
         });
         stackDd.appendChild(select);
       }
@@ -710,12 +1000,83 @@
       showView("book");
     }
 
+    function resetNewStackForm() {
+      newStackName.value = "";
+      newStackName.disabled = false;
+      btnCreateStack.disabled = true;
+      newStackError.style.display = "none";
+      newStackFollowup.style.display = "none";
+      createdStackId = null;
+    }
+
+    function showNewStack() {
+      resetNewStackForm();
+      highlightSidebar(null);
+      showView("new-stack");
+    }
+
+    newStackName.addEventListener("input", () => {
+      btnCreateStack.disabled = !newStackName.value.trim();
+    });
+
+    btnCreateStack.addEventListener("click", async () => {
+      newStackError.style.display = "none";
+      btnCreateStack.disabled = true;
+
+      try {
+        const res = await fetch("/api/stack", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newStackName.value.trim() }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "Failed to create stack");
+        }
+
+        const newStack = await res.json();
+        createdStackId = newStack.id;
+
+        // Update sidebar
+        stacksCache = null;
+        await loadStacks();
+
+        newStackName.disabled = true;
+        btnCreateStack.disabled = true;
+        newStackFollowup.style.display = "flex";
+      } catch (e) {
+        newStackError.textContent = e.message;
+        newStackError.style.display = "block";
+        btnCreateStack.disabled = !newStackName.value.trim();
+      }
+    });
+
+    btnAddAnother.addEventListener("click", () => {
+      resetNewStackForm();
+    });
+
+    btnGotoStack.addEventListener("click", () => {
+      if (createdStackId) navigate("/stacks/" + createdStackId);
+    });
+
+    document.getElementById("btn-cancel-create").addEventListener("click", () => {
+      navigate("/");
+    });
+
+    document.getElementById("sidebar-add-stack").addEventListener("click", () => {
+      navigate("/stacks/new");
+    });
+
     async function route() {
       const path = window.location.pathname;
       let match;
 
       if ((match = path.match(/^\/book\/(\d+)$/))) {
         await showBook(match[1]);
+      } else if (path === "/stacks/new") {
+        await loadStacks();
+        showNewStack();
       } else if ((match = path.match(/^\/stacks\/(\d+)$/))) {
         await showStack(match[1]);
       } else {
@@ -724,6 +1085,11 @@
         showView("welcome");
       }
     }
+
+    document.getElementById("navbar-home").addEventListener("click", (e) => {
+      e.preventDefault();
+      navigate("/");
+    });
 
     window.addEventListener("popstate", route);
     route();

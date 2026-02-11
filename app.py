@@ -89,6 +89,99 @@ def get_stack(stack_id: int):
     return {"id": stack["id"], "name": stack["name"], "books": [dict(b) for b in books]}
 
 
+class StackCreate(BaseModel):
+    name: str
+
+
+@api.post("/stack", response_model=Stack, status_code=201)
+def create_stack(body: StackCreate):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Stack name cannot be empty")
+
+    conn = get_db()
+    existing = conn.execute("SELECT id FROM stack WHERE name = ?", (name,)).fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(status_code=400, detail="A stack with that name already exists")
+
+    try:
+        cur = conn.execute("INSERT INTO stack (name) VALUES (?)", (name,))
+        conn.commit()
+        stack_id = cur.lastrowid
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    conn.close()
+    return {"id": stack_id, "name": name}
+
+
+class BookCreate(BaseModel):
+    title: str
+    author: str | None = None
+    publisher: str | None = None
+    stack_id: int
+    position: str = "end"  # "beginning" or "end"
+
+
+@api.post("/book", response_model=Book, status_code=201)
+def create_book(body: BookCreate):
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+
+    if body.position not in ("beginning", "end"):
+        raise HTTPException(status_code=400, detail="position must be 'beginning' or 'end'")
+
+    conn = get_db()
+    stack = conn.execute("SELECT id FROM stack WHERE id = ?", (body.stack_id,)).fetchone()
+    if stack is None:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Stack not found")
+
+    try:
+        existing = conn.execute(
+            "SELECT id, position FROM book WHERE stack_id = ? ORDER BY position",
+            (body.stack_id,),
+        ).fetchall()
+
+        if body.position == "beginning":
+            # Shift existing books up to make room at position 0
+            for b in existing:
+                conn.execute(
+                    "UPDATE book SET position = ? WHERE id = ?",
+                    (-(b["position"] + 2), b["id"]),
+                )
+            for b in existing:
+                conn.execute(
+                    "UPDATE book SET position = ? WHERE id = ?",
+                    (b["position"] + 1, b["id"]),
+                )
+            new_pos = 0
+        else:
+            new_pos = len(existing)
+
+        cur = conn.execute(
+            "INSERT INTO book (title, author, publisher, stack_id, position) VALUES (?, ?, ?, ?, ?)",
+            (title, body.author, body.publisher, body.stack_id, new_pos),
+        )
+        conn.commit()
+        book_id = cur.lastrowid
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    row = conn.execute(
+        "SELECT id, title, author, publisher, stack_id, position FROM book WHERE id = ?",
+        (book_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row)
+
+
 class BookUpdate(BaseModel):
     title: str
     author: str | None = None
