@@ -32,7 +32,30 @@
       font-weight: 700;
     }
 
+    #navbar-home {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    #navbar-logo {
+      height: 28px;
+      width: 28px;
+      object-fit: contain;
+    }
+
     #navbar a:hover { color: #aed6f1; }
+
+    #navbar .nav-links {
+      margin-left: auto;
+      display: flex;
+      gap: 1rem;
+    }
+
+    #navbar .nav-links a {
+      font-size: 0.9rem;
+      font-weight: 400;
+    }
 
     #content {
       display: flex;
@@ -362,11 +385,64 @@
     }
 
     #sidebar-add-stack:hover { background: #3d566e; }
+
+    #search-view { display: none; }
+
+    .search-bar {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+      max-width: 600px;
+    }
+
+    .search-bar input[type="text"] {
+      flex: 1;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 0.95rem;
+      font-family: inherit;
+    }
+
+    .search-bar button {
+      padding: 0.45rem 1rem;
+      background: #2980b9;
+      color: #fff;
+      border: 1px solid #2980b9;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .search-bar button:hover { background: #2472a4; }
+
+    .search-bar button:disabled {
+      background: #a0c4e0;
+      border-color: #a0c4e0;
+      cursor: default;
+    }
+
+    .search-options {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      font-size: 0.9rem;
+    }
+
+    .search-options label {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
   <header id="navbar">
-    <a href="/" id="navbar-home">Garage Library</a>
+    <a href="/" id="navbar-home"><img id="navbar-logo" src="/static/logo.png" alt=""> Garage Library</a>
+    <div class="nav-links">
+      <a href="/search" id="navbar-search">Search</a>
+    </div>
   </header>
   <div id="content">
   <nav id="sidebar">
@@ -379,6 +455,31 @@
     <div id="welcome">
       <h1>Garage Library</h1>
       <p>Select a stack from the sidebar to view its books.</p>
+    </div>
+    <div id="search-view">
+      <h1>Search Books</h1>
+      <div class="search-bar">
+        <input type="text" id="search-input" placeholder="Search...">
+        <button id="btn-search">Search</button>
+      </div>
+      <div class="search-options">
+        <label><input type="checkbox" id="search-title" checked> Title</label>
+        <label><input type="checkbox" id="search-author" checked> Author</label>
+        <label><input type="checkbox" id="search-publisher"> Publisher</label>
+      </div>
+      <div id="search-error" class="error-msg"></div>
+      <p id="search-count" style="color:#666; margin-bottom:0.5rem; display:none;"></p>
+      <table id="search-results-table" style="display:none;">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Author</th>
+            <th>Publisher</th>
+            <th>Stack</th>
+          </tr>
+        </thead>
+        <tbody id="search-results-tbody"></tbody>
+      </table>
     </div>
     <div id="book-view">
       <div class="book-toolbar">
@@ -521,11 +622,14 @@
     const btnGotoStack = document.getElementById("btn-goto-stack");
     let createdStackId = null;
 
+    const searchView = document.getElementById("search-view");
+
     function showView(name) {
       welcome.style.display = name === "welcome" ? "block" : "none";
       stackView.style.display = name === "stack" ? "block" : "none";
       bookView.style.display = name === "book" ? "block" : "none";
       newStackView.style.display = name === "new-stack" ? "block" : "none";
+      searchView.style.display = name === "search" ? "block" : "none";
     }
 
     function navigate(url) {
@@ -1179,12 +1283,109 @@
       navigate("/stacks/new");
     });
 
+    // --- Search ---
+    const searchInput = document.getElementById("search-input");
+    const btnSearch = document.getElementById("btn-search");
+    const searchTitle = document.getElementById("search-title");
+    const searchAuthor = document.getElementById("search-author");
+    const searchPublisher = document.getElementById("search-publisher");
+    const searchError = document.getElementById("search-error");
+    const searchCount = document.getElementById("search-count");
+    const searchResultsTable = document.getElementById("search-results-table");
+    const searchResultsTbody = document.getElementById("search-results-tbody");
+
+    async function doSearch() {
+      const q = searchInput.value.trim();
+      if (!q) return;
+
+      searchError.style.display = "none";
+      searchCount.style.display = "none";
+      searchResultsTable.style.display = "none";
+
+      const params = new URLSearchParams();
+      params.set("q", q);
+      params.set("title", searchTitle.checked);
+      params.set("author", searchAuthor.checked);
+      params.set("publisher", searchPublisher.checked);
+
+      try {
+        const res = await fetch("/api/books/search?" + params.toString());
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "Search failed");
+        }
+
+        const results = await res.json();
+        searchResultsTbody.innerHTML = "";
+
+        results.forEach(book => {
+          const tr = document.createElement("tr");
+
+          const titleTd = document.createElement("td");
+          const titleLink = document.createElement("a");
+          titleLink.href = "/book/" + book.id;
+          titleLink.textContent = book.title;
+          titleLink.addEventListener("click", (e) => {
+            e.preventDefault();
+            navigate("/book/" + book.id);
+          });
+          titleTd.appendChild(titleLink);
+
+          const authorTd = document.createElement("td");
+          authorTd.textContent = book.author || "\u2014";
+          const pubTd = document.createElement("td");
+          pubTd.textContent = book.publisher || "\u2014";
+          const stackTd = document.createElement("td");
+          const stackLink = document.createElement("a");
+          stackLink.href = "/stacks/" + book.stack_id;
+          stackLink.textContent = book.stack_name;
+          stackLink.addEventListener("click", (e) => {
+            e.preventDefault();
+            navigate("/stacks/" + book.stack_id);
+          });
+          stackTd.appendChild(stackLink);
+
+          tr.appendChild(titleTd);
+          tr.appendChild(authorTd);
+          tr.appendChild(pubTd);
+          tr.appendChild(stackTd);
+          searchResultsTbody.appendChild(tr);
+        });
+
+        searchCount.textContent = results.length + " result" + (results.length !== 1 ? "s" : "") + " found.";
+        searchCount.style.display = "block";
+        if (results.length > 0) searchResultsTable.style.display = "";
+      } catch (e) {
+        searchError.textContent = e.message;
+        searchError.style.display = "block";
+      }
+    }
+
+    btnSearch.addEventListener("click", doSearch);
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") doSearch();
+    });
+
+    function showSearch() {
+      highlightSidebar(null);
+      showView("search");
+      searchInput.focus();
+    }
+
+    document.getElementById("navbar-search").addEventListener("click", (e) => {
+      e.preventDefault();
+      navigate("/search");
+    });
+
     async function route() {
       const path = window.location.pathname;
       let match;
 
       if ((match = path.match(/^\/book\/(\d+)$/))) {
         await showBook(match[1]);
+      } else if (path === "/search") {
+        await loadStacks();
+        showSearch();
       } else if (path === "/stacks/new") {
         await loadStacks();
         showNewStack();

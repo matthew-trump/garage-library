@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.routing import APIRouter
 from fastapi.staticfiles import StaticFiles
@@ -51,6 +51,49 @@ api = APIRouter(prefix="/api")
 def list_books():
     conn = get_db()
     rows = conn.execute("SELECT id, title, author, publisher, stack_id, position FROM book").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+class BookSearchResult(BaseModel):
+    id: int
+    title: str
+    author: str | None
+    publisher: str | None
+    stack_id: int
+    stack_name: str
+
+
+@api.get("/books/search", response_model=list[BookSearchResult])
+def search_books(
+    q: str = Query(..., min_length=1),
+    title: bool = Query(True),
+    author: bool = Query(True),
+    publisher: bool = Query(False),
+):
+    if not (title or author or publisher):
+        raise HTTPException(status_code=400, detail="At least one search field must be selected")
+
+    conn = get_db()
+    conditions = []
+    params = []
+    if title:
+        conditions.append("b.title LIKE ?")
+        params.append(f"%{q}%")
+    if author:
+        conditions.append("b.author LIKE ?")
+        params.append(f"%{q}%")
+    if publisher:
+        conditions.append("b.publisher LIKE ?")
+        params.append(f"%{q}%")
+
+    where = " OR ".join(conditions)
+    rows = conn.execute(
+        f"SELECT b.id, b.title, b.author, b.publisher, b.stack_id, s.name as stack_name "
+        f"FROM book b JOIN stack s ON b.stack_id = s.id "
+        f"WHERE {where} ORDER BY b.title",
+        params,
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
