@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Garage Library</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -412,10 +413,28 @@
     <div id="stack-view" style="display:none">
       <div class="stack-toolbar">
         <h1 id="stack-name"></h1>
+        <button id="btn-edit-stack">Edit Stack</button>
         <button id="btn-edit">Edit Order</button>
         <button id="btn-save" class="btn-save" style="display:none" disabled>Save</button>
         <button id="btn-cancel" class="btn-cancel" style="display:none">Cancel</button>
       </div>
+      <p id="stack-location" style="color:#666; margin-bottom:1rem;"></p>
+      <div id="stack-edit-form" style="display:none; background:#fff; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,0.1); margin-bottom:1rem; max-width:400px;">
+        <div id="stack-edit-error" class="error-msg"></div>
+        <div class="form-group">
+          <label for="stack-edit-name">Name</label>
+          <input type="text" id="stack-edit-name">
+        </div>
+        <div class="form-group">
+          <label for="stack-edit-location">Location</label>
+          <input type="text" id="stack-edit-location">
+        </div>
+        <div class="form-actions">
+          <button id="btn-save-stack-edit" class="btn-primary" disabled>Save</button>
+          <button id="btn-cancel-stack-edit">Cancel</button>
+        </div>
+      </div>
+      <div id="stack-edit-success" class="success-msg" style="max-width:400px;"></div>
       <div id="error-msg" class="error-msg"></div>
       <div id="add-book-area">
         <button id="btn-add-book" style="margin-bottom:1rem;">+ Add Book</button>
@@ -788,6 +807,93 @@
       }
     });
 
+    // --- Edit Stack ---
+    const btnEditStack = document.getElementById("btn-edit-stack");
+    const stackEditForm = document.getElementById("stack-edit-form");
+    const stackEditError = document.getElementById("stack-edit-error");
+    const stackEditSuccess = document.getElementById("stack-edit-success");
+    const stackEditName = document.getElementById("stack-edit-name");
+    const stackEditLocation = document.getElementById("stack-edit-location");
+    const btnSaveStackEdit = document.getElementById("btn-save-stack-edit");
+    const btnCancelStackEdit = document.getElementById("btn-cancel-stack-edit");
+    const stackLocation = document.getElementById("stack-location");
+    let currentStackData = null;
+    let stackEditSuccessTimer = null;
+
+    function checkStackEditChanged() {
+      if (!currentStackData) return;
+      const nameChanged = stackEditName.value !== currentStackData.name;
+      const locChanged = (stackEditLocation.value || "") !== (currentStackData.location || "");
+      btnSaveStackEdit.disabled = !(nameChanged || locChanged);
+    }
+
+    btnEditStack.addEventListener("click", () => {
+      stackEditForm.style.display = "block";
+      btnEditStack.style.display = "none";
+      stackEditError.style.display = "none";
+      stackEditSuccess.style.display = "none";
+      if (stackEditSuccessTimer) { clearTimeout(stackEditSuccessTimer); stackEditSuccessTimer = null; }
+      stackEditName.value = currentStackData.name;
+      stackEditLocation.value = currentStackData.location || "";
+      btnSaveStackEdit.disabled = true;
+      stackEditName.focus();
+    });
+
+    btnCancelStackEdit.addEventListener("click", () => {
+      stackEditForm.style.display = "none";
+      btnEditStack.style.display = "";
+    });
+
+    stackEditName.addEventListener("input", checkStackEditChanged);
+    stackEditLocation.addEventListener("input", checkStackEditChanged);
+
+    btnSaveStackEdit.addEventListener("click", async () => {
+      stackEditError.style.display = "none";
+      btnSaveStackEdit.disabled = true;
+
+      try {
+        const res = await fetch("/api/stack/" + currentStackId, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: stackEditName.value.trim(),
+            location: stackEditLocation.value.trim() || null,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "Failed to update stack");
+        }
+
+        const updated = await res.json();
+        currentStackData.name = updated.name;
+        currentStackData.location = updated.location;
+
+        // Update display
+        stackName.textContent = "Stack " + updated.name;
+        stackLocation.textContent = updated.location || "";
+
+        // Update sidebar
+        stacksCache = null;
+        await loadStacks();
+        highlightSidebar(currentStackId);
+
+        stackEditForm.style.display = "none";
+        btnEditStack.style.display = "";
+
+        stackEditSuccess.textContent = "Stack updated successfully.";
+        stackEditSuccess.style.display = "block";
+        stackEditSuccessTimer = setTimeout(() => {
+          stackEditSuccess.style.display = "none";
+        }, 3000);
+      } catch (e) {
+        stackEditError.textContent = e.message;
+        stackEditError.style.display = "block";
+        checkStackEditChanged();
+      }
+    });
+
     async function showStack(stackId) {
       await loadStacks();
       highlightSidebar(stackId);
@@ -795,15 +901,20 @@
       addBookForm.style.display = "none";
       btnAddBook.style.display = "";
       resetAddBookForm();
+      stackEditForm.style.display = "none";
+      btnEditStack.style.display = "";
+      stackEditSuccess.style.display = "none";
 
       const res = await fetch("/api/stack/" + stackId);
       if (!res.ok) { showView("welcome"); return; }
       const data = await res.json();
 
       currentStackId = stackId;
+      currentStackData = data;
       currentBooks = data.books;
 
       stackName.textContent = "Stack " + data.name;
+      stackLocation.textContent = data.location || "";
       renderBooks(currentBooks);
       showView("stack");
     }

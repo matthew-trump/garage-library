@@ -32,11 +32,13 @@ class Book(BaseModel):
 class Stack(BaseModel):
     id: int
     name: str
+    location: str | None
 
 
 class StackDetail(BaseModel):
     id: int
     name: str
+    location: str | None
     books: list[Book]
 
 
@@ -69,7 +71,7 @@ def get_book(book_id: int):
 @api.get("/stacks", response_model=list[Stack])
 def list_stacks():
     conn = get_db()
-    rows = conn.execute("SELECT id, name FROM stack").fetchall()
+    rows = conn.execute("SELECT id, name, location FROM stack").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -77,7 +79,7 @@ def list_stacks():
 @api.get("/stack/{stack_id}", response_model=StackDetail)
 def get_stack(stack_id: int):
     conn = get_db()
-    stack = conn.execute("SELECT id, name FROM stack WHERE id = ?", (stack_id,)).fetchone()
+    stack = conn.execute("SELECT id, name, location FROM stack WHERE id = ?", (stack_id,)).fetchone()
     if stack is None:
         conn.close()
         raise HTTPException(status_code=404, detail="Stack not found")
@@ -86,11 +88,12 @@ def get_stack(stack_id: int):
         (stack_id,),
     ).fetchall()
     conn.close()
-    return {"id": stack["id"], "name": stack["name"], "books": [dict(b) for b in books]}
+    return {"id": stack["id"], "name": stack["name"], "location": stack["location"], "books": [dict(b) for b in books]}
 
 
 class StackCreate(BaseModel):
     name: str
+    location: str | None = None
 
 
 @api.post("/stack", response_model=Stack, status_code=201)
@@ -99,6 +102,8 @@ def create_stack(body: StackCreate):
     if not name:
         raise HTTPException(status_code=400, detail="Stack name cannot be empty")
 
+    location = body.location.strip() if body.location else None
+
     conn = get_db()
     existing = conn.execute("SELECT id FROM stack WHERE name = ?", (name,)).fetchone()
     if existing:
@@ -106,7 +111,7 @@ def create_stack(body: StackCreate):
         raise HTTPException(status_code=400, detail="A stack with that name already exists")
 
     try:
-        cur = conn.execute("INSERT INTO stack (name) VALUES (?)", (name,))
+        cur = conn.execute("INSERT INTO stack (name, location) VALUES (?, ?)", (name, location))
         conn.commit()
         stack_id = cur.lastrowid
     except Exception as e:
@@ -115,7 +120,7 @@ def create_stack(body: StackCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
     conn.close()
-    return {"id": stack_id, "name": name}
+    return {"id": stack_id, "name": name, "location": location}
 
 
 class BookCreate(BaseModel):
@@ -281,6 +286,44 @@ def update_book(book_id: int, body: BookUpdate):
     return dict(updated)
 
 
+class StackUpdate(BaseModel):
+    name: str
+    location: str | None = None
+
+
+@api.patch("/stack/{stack_id}", response_model=Stack)
+def update_stack(stack_id: int, body: StackUpdate):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Stack name cannot be empty")
+
+    location = body.location.strip() if body.location else None
+
+    conn = get_db()
+    stack = conn.execute("SELECT id, name FROM stack WHERE id = ?", (stack_id,)).fetchone()
+    if stack is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Stack not found")
+
+    # Check name uniqueness if changed
+    if name != stack["name"]:
+        dup = conn.execute("SELECT id FROM stack WHERE name = ? AND id != ?", (name, stack_id)).fetchone()
+        if dup:
+            conn.close()
+            raise HTTPException(status_code=400, detail="A stack with that name already exists")
+
+    try:
+        conn.execute("UPDATE stack SET name = ?, location = ? WHERE id = ?", (name, location, stack_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    conn.close()
+    return {"id": stack_id, "name": name, "location": location}
+
+
 class ReorderRequest(BaseModel):
     book_ids: list[int]
 
@@ -288,7 +331,7 @@ class ReorderRequest(BaseModel):
 @api.put("/stack/{stack_id}", response_model=StackDetail)
 def reorder_stack(stack_id: int, body: ReorderRequest):
     conn = get_db()
-    stack = conn.execute("SELECT id, name FROM stack WHERE id = ?", (stack_id,)).fetchone()
+    stack = conn.execute("SELECT id, name, location FROM stack WHERE id = ?", (stack_id,)).fetchone()
     if stack is None:
         conn.close()
         raise HTTPException(status_code=404, detail="Stack not found")
@@ -327,7 +370,7 @@ def reorder_stack(stack_id: int, body: ReorderRequest):
         (stack_id,),
     ).fetchall()
     conn.close()
-    return {"id": stack["id"], "name": stack["name"], "books": [dict(b) for b in books]}
+    return {"id": stack["id"], "name": stack["name"], "location": stack["location"], "books": [dict(b) for b in books]}
 
 
 app.include_router(api)
@@ -340,9 +383,9 @@ def root():
     return FileResponse("static/index.html")
 
 
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
 @app.get("/{path:path}", include_in_schema=False)
 def frontend_catchall(path: str):
     return FileResponse("static/index.html")
-
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
