@@ -160,7 +160,6 @@ def register(body: UserCreate):
 @api.post("/login", response_model=TokenResponse)
 def login(body: UserLogin):
     username = body.username.strip().lower()
-
     conn = get_db()
     row = conn.execute(
         "SELECT id, username, password_hash FROM user WHERE username = ?", (username,)
@@ -174,6 +173,12 @@ def login(body: UserLogin):
     return {"token": token}
 
 
+@api.get("/users", response_model=list[UserResponse])
+def list_users():
+    conn = get_db()
+    rows = conn.execute("SELECT id, username FROM user").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 
