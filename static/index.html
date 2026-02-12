@@ -442,8 +442,8 @@
       display: none;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
       height: 100%;
+      padding-top: 15%;
     }
     #logged-out-view { display: none; }
 
@@ -503,7 +503,7 @@
   <header id="navbar">
     <a href="/" id="navbar-home"><img id="navbar-logo" src="/static/logo.png" alt=""> Garage Library</a>
     <div class="nav-links">
-      <a href="/search" id="navbar-search">Search</a>
+      <a href="/search" id="navbar-search" style="display:none">Search</a>
       <a href="/admin" id="navbar-admin" style="display:none">Admin</a>
       <a href="/login" id="navbar-login">Login</a>
       <span id="navbar-user" class="nav-user" style="display:none">
@@ -782,12 +782,14 @@
         navbarUser.style.display = "";
         navbarUsername.textContent = user.username;
         navbarAdmin.style.display = user.level >= 2 ? "" : "none";
+        document.getElementById("navbar-search").style.display = "";
         sidebar.style.display = "";
       } else {
         navbarLogin.style.display = "";
         navbarUser.style.display = "none";
         navbarUsername.textContent = "";
         navbarAdmin.style.display = "none";
+        document.getElementById("navbar-search").style.display = "none";
         sidebar.style.display = "none";
       }
     }
@@ -1581,6 +1583,7 @@
     }
 
     function showSearch() {
+      if (!getUser()) { navigate("/login"); return; }
       highlightSidebar(null);
       showView("search");
       searchInput.focus();

@@ -6,17 +6,22 @@ from pathlib import Path
 
 import bcrypt
 import jwt
+from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.routing import APIRouter
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+load_dotenv(Path(__file__).parent / ".env.local")
+
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-do-not-use-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24
 
 DB_PATH = Path(__file__).parent / "garage-library.db"
+DATABASE_BACKUP_DIRECTORY = os.environ.get("DATABASE_BACKUP_DIRECTORY")
+ALLOW_CREATE_ACCOUNT = os.environ.get("ALLOW_CREATE_ACCOUNT", "").lower() in ("1", "true", "yes")
 
 app = FastAPI(title="Garage Library API")
 
@@ -188,6 +193,9 @@ api = APIRouter(prefix="/api")
 
 @api.post("/register", response_model=UserResponse, status_code=201)
 def register(body: UserCreate):
+    if not ALLOW_CREATE_ACCOUNT:
+        raise HTTPException(status_code=403, detail="Account registration is not available")
+
     username = validate_username(body.username)
     validate_password(body.password)
 
