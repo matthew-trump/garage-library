@@ -438,7 +438,13 @@
 
     #admin-view { display: none; }
     #users-view { display: none; }
-    #login-view { display: none; }
+    #login-view {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+    }
     #logged-out-view { display: none; }
 
     .login-form {
@@ -507,7 +513,7 @@
     </div>
   </header>
   <div id="content">
-  <nav id="sidebar">
+  <nav id="sidebar" style="display:none">
     <h2>Stacks</h2>
     <ul id="stack-list"></ul>
     <div id="sidebar-add-stack">+ New Stack</div>
@@ -627,7 +633,8 @@
         <button id="btn-save" class="btn-save" style="display:none" disabled>Save</button>
         <button id="btn-cancel" class="btn-cancel" style="display:none">Cancel</button>
       </div>
-      <p id="stack-location" style="color:#666; margin-bottom:1rem;"></p>
+      <p id="stack-location" style="color:#666; margin-bottom:0.25rem;"></p>
+      <p id="stack-user-id" style="color:#666; font-size:0.85rem; margin-bottom:1rem;"></p>
       <div id="stack-edit-form" style="display:none; background:#fff; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,0.1); margin-bottom:1rem; max-width:400px;">
         <div id="stack-edit-error" class="error-msg"></div>
         <div class="form-group">
@@ -766,6 +773,8 @@
 
     const navbarAdmin = document.getElementById("navbar-admin");
 
+    const sidebar = document.getElementById("sidebar");
+
     function updateNavAuth() {
       const user = getUser();
       if (user) {
@@ -773,11 +782,13 @@
         navbarUser.style.display = "";
         navbarUsername.textContent = user.username;
         navbarAdmin.style.display = user.level >= 2 ? "" : "none";
+        sidebar.style.display = "";
       } else {
         navbarLogin.style.display = "";
         navbarUser.style.display = "none";
         navbarUsername.textContent = "";
         navbarAdmin.style.display = "none";
+        sidebar.style.display = "none";
       }
     }
 
@@ -787,7 +798,7 @@
       bookView.style.display = name === "book" ? "block" : "none";
       newStackView.style.display = name === "new-stack" ? "block" : "none";
       searchView.style.display = name === "search" ? "block" : "none";
-      loginView.style.display = name === "login" ? "block" : "none";
+      loginView.style.display = name === "login" ? "flex" : "none";
       loggedOutView.style.display = name === "logged-out" ? "block" : "none";
       adminView.style.display = name === "admin" ? "block" : "none";
       usersView.style.display = name === "users" ? "block" : "none";
@@ -801,7 +812,10 @@
 
     async function loadStacks() {
       if (stacksCache) return stacksCache;
-      const res = await fetch("/api/stacks");
+      const res = await fetch("/api/stacks", {
+        headers: { "Authorization": "Bearer " + getToken() },
+      });
+      if (!res.ok) { stacksCache = []; return stacksCache; }
       stacksCache = await res.json();
       stacksCache.sort((a, b) => a.name.localeCompare(b.name));
       stackList.innerHTML = "";
@@ -1053,7 +1067,9 @@
         await res.json();
 
         // Refresh the stack to show updated order
-        const stackRes = await fetch("/api/stack/" + currentStackId);
+        const stackRes = await fetch("/api/stack/" + currentStackId, {
+          headers: { "Authorization": "Bearer " + getToken() },
+        });
         const stackData = await stackRes.json();
         currentBooks = stackData.books;
         renderBooks(currentBooks);
@@ -1174,7 +1190,9 @@
       btnEditStack.style.display = "";
       stackEditSuccess.style.display = "none";
 
-      const res = await fetch("/api/stack/" + stackId);
+      const res = await fetch("/api/stack/" + stackId, {
+        headers: { "Authorization": "Bearer " + getToken() },
+      });
       if (!res.ok) { showView("welcome"); return; }
       const data = await res.json();
 
@@ -1184,6 +1202,7 @@
 
       stackName.textContent = "Stack " + data.name;
       stackLocation.textContent = data.location || "";
+      document.getElementById("stack-user-id").textContent = data.user_id != null ? "User ID: " + data.user_id : "";
       renderBooks(currentBooks);
       showView("stack");
     }
@@ -1421,7 +1440,7 @@
       try {
         const res = await fetch("/api/stack", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + getToken() },
           body: JSON.stringify({ name: newStackName.value.trim() }),
         });
 
@@ -1604,6 +1623,7 @@
 
         const data = await res.json();
         localStorage.setItem("auth_token", data.token);
+        stacksCache = null;
         updateNavAuth();
         loginUsername.value = "";
         loginPassword.value = "";
@@ -1624,6 +1644,8 @@
     document.getElementById("btn-logout").addEventListener("click", () => {
       localStorage.removeItem("auth_token");
       clearSearchResults();
+      stacksCache = null;
+      stackList.innerHTML = "";
       updateNavAuth();
       navigate("/logged-out");
     });

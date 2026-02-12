@@ -59,6 +59,17 @@ def init_db():
     # Set all existing books to user_id 2
     conn.execute("UPDATE book SET user_id = 2 WHERE user_id IS NULL")
     conn.commit()
+
+    # Migration: add user_id column to stack
+    try:
+        conn.execute("ALTER TABLE stack ADD COLUMN user_id INTEGER REFERENCES user(id)")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    # Set all existing stacks to user_id 2
+    conn.execute("UPDATE stack SET user_id = 2 WHERE user_id IS NULL")
+    conn.commit()
     conn.close()
 
 
@@ -139,12 +150,14 @@ class Stack(BaseModel):
     id: int
     name: str
     location: str | None
+    user_id: int | None
 
 
 class StackDetail(BaseModel):
     id: int
     name: str
     location: str | None
+    user_id: int | None
     books: list[Book]
 
 
@@ -313,17 +326,21 @@ def get_book(book_id: int):
 
 
 @api.get("/stacks", response_model=list[Stack])
-def list_stacks():
+def list_stacks(authorization: str = Header(...)):
+    caller = require_auth(authorization)
+    caller_id = int(caller["sub"])
     conn = get_db()
-    rows = conn.execute("SELECT id, name, location FROM stack").fetchall()
+    rows = conn.execute("SELECT id, name, location, user_id FROM stack WHERE user_id = ?", (caller_id,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
 @api.get("/stack/{stack_id}", response_model=StackDetail)
-def get_stack(stack_id: int):
+def get_stack(stack_id: int, authorization: str = Header(...)):
+    caller = require_auth(authorization)
+    caller_id = int(caller["sub"])
     conn = get_db()
-    stack = conn.execute("SELECT id, name, location FROM stack WHERE id = ?", (stack_id,)).fetchone()
+    stack = conn.execute("SELECT id, name, location, user_id FROM stack WHERE id = ? AND user_id = ?", (stack_id, caller_id)).fetchone()
     if stack is None:
         conn.close()
         raise HTTPException(status_code=404, detail="Stack not found")
@@ -332,16 +349,28 @@ def get_stack(stack_id: int):
         (stack_id,),
     ).fetchall()
     conn.close()
-    return {"id": stack["id"], "name": stack["name"], "location": stack["location"], "books": [dict(b) for b in books]}
+    return {"id": stack["id"], "name": stack["name"], "location": stack["location"], "user_id": stack["user_id"], "books": [dict(b) for b in books]}
 
 
 class StackCreate(BaseModel):
     name: str
     location: str | None = None
+    user_id: int | None = None
 
 
 @api.post("/stack", response_model=Stack, status_code=201)
-def create_stack(body: StackCreate):
+def create_stack(body: StackCreate, authorization: str = Header(...)):
+    caller = require_auth(authorization)
+    caller_level = caller.get("level", 1)
+    caller_id = int(caller["sub"])
+
+    if caller_level >= 2:
+        stack_user_id = body.user_id if body.user_id is not None else caller_id
+    else:
+        if body.user_id is not None:
+            raise HTTPException(status_code=400, detail="Normal users cannot specify user_id")
+        stack_user_id = caller_id
+
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Stack name cannot be empty")
@@ -349,13 +378,20 @@ def create_stack(body: StackCreate):
     location = body.location.strip() if body.location else None
 
     conn = get_db()
+
+    # Validate user_id exists
+    target_user = conn.execute("SELECT id FROM user WHERE id = ?", (stack_user_id,)).fetchone()
+    if target_user is None:
+        conn.close()
+        raise HTTPException(status_code=400, detail="User not found")
+
     existing = conn.execute("SELECT id FROM stack WHERE name = ?", (name,)).fetchone()
     if existing:
         conn.close()
         raise HTTPException(status_code=400, detail="A stack with that name already exists")
 
     try:
-        cur = conn.execute("INSERT INTO stack (name, location) VALUES (?, ?)", (name, location))
+        cur = conn.execute("INSERT INTO stack (name, location, user_id) VALUES (?, ?, ?)", (name, location, stack_user_id))
         conn.commit()
         stack_id = cur.lastrowid
     except Exception as e:
@@ -364,7 +400,7 @@ def create_stack(body: StackCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
     conn.close()
-    return {"id": stack_id, "name": name, "location": location}
+    return {"id": stack_id, "name": name, "location": location, "user_id": stack_user_id}
 
 
 class BookCreate(BaseModel):
@@ -594,7 +630,7 @@ def update_stack(stack_id: int, body: StackUpdate):
     location = body.location.strip() if body.location else None
 
     conn = get_db()
-    stack = conn.execute("SELECT id, name FROM stack WHERE id = ?", (stack_id,)).fetchone()
+    stack = conn.execute("SELECT id, name, user_id FROM stack WHERE id = ?", (stack_id,)).fetchone()
     if stack is None:
         conn.close()
         raise HTTPException(status_code=404, detail="Stack not found")
@@ -615,7 +651,7 @@ def update_stack(stack_id: int, body: StackUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
     conn.close()
-    return {"id": stack_id, "name": name, "location": location}
+    return {"id": stack_id, "name": name, "location": location, "user_id": stack["user_id"]}
 
 
 class ReorderRequest(BaseModel):
@@ -625,7 +661,7 @@ class ReorderRequest(BaseModel):
 @api.put("/stack/{stack_id}", response_model=StackDetail)
 def reorder_stack(stack_id: int, body: ReorderRequest):
     conn = get_db()
-    stack = conn.execute("SELECT id, name, location FROM stack WHERE id = ?", (stack_id,)).fetchone()
+    stack = conn.execute("SELECT id, name, location, user_id FROM stack WHERE id = ?", (stack_id,)).fetchone()
     if stack is None:
         conn.close()
         raise HTTPException(status_code=404, detail="Stack not found")
@@ -664,7 +700,7 @@ def reorder_stack(stack_id: int, body: ReorderRequest):
         (stack_id,),
     ).fetchall()
     conn.close()
-    return {"id": stack["id"], "name": stack["name"], "location": stack["location"], "books": [dict(b) for b in books]}
+    return {"id": stack["id"], "name": stack["name"], "location": stack["location"], "user_id": stack["user_id"], "books": [dict(b) for b in books]}
 
 
 app.include_router(api)
