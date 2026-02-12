@@ -498,7 +498,7 @@
     <a href="/" id="navbar-home"><img id="navbar-logo" src="/static/logo.png" alt=""> Garage Library</a>
     <div class="nav-links">
       <a href="/search" id="navbar-search">Search</a>
-      <a href="/admin" id="navbar-admin">Admin</a>
+      <a href="/admin" id="navbar-admin" style="display:none">Admin</a>
       <a href="/login" id="navbar-login">Login</a>
       <span id="navbar-user" class="nav-user" style="display:none">
         <span id="navbar-username"></span>
@@ -612,6 +612,7 @@
           <tr>
             <th>ID</th>
             <th>Username</th>
+            <th>Level</th>
           </tr>
         </thead>
         <tbody id="users-tbody"></tbody>
@@ -756,11 +757,13 @@
       try {
         const payload = token.split(".")[1];
         const decoded = JSON.parse(atob(payload));
-        return { sub: decoded.sub, username: decoded.username };
+        return { sub: decoded.sub, username: decoded.username, level: decoded.level || 1 };
       } catch (e) {
         return null;
       }
     }
+
+    const navbarAdmin = document.getElementById("navbar-admin");
 
     function updateNavAuth() {
       const user = getUser();
@@ -768,10 +771,12 @@
         navbarLogin.style.display = "none";
         navbarUser.style.display = "";
         navbarUsername.textContent = user.username;
+        navbarAdmin.style.display = user.level >= 2 ? "" : "none";
       } else {
         navbarLogin.style.display = "";
         navbarUser.style.display = "none";
         navbarUsername.textContent = "";
+        navbarAdmin.style.display = "none";
       }
     }
 
@@ -1609,17 +1614,23 @@
 
     // --- Admin ---
     function showAdmin() {
+      const user = getUser();
+      if (!user || user.level < 2) { navigate("/"); return; }
       highlightSidebar(null);
       showView("admin");
     }
 
     async function showUsers() {
+      const user = getUser();
+      if (!user || user.level < 2) { navigate("/"); return; }
       highlightSidebar(null);
       showView("users");
       const tbody = document.getElementById("users-tbody");
       tbody.innerHTML = "";
       try {
-        const res = await fetch("/api/users");
+        const res = await fetch("/api/users", {
+          headers: { "Authorization": "Bearer " + getToken() },
+        });
         if (!res.ok) throw new Error("Failed to load users");
         const users = await res.json();
         users.forEach(u => {
@@ -1628,12 +1639,15 @@
           idTd.textContent = u.id;
           const nameTd = document.createElement("td");
           nameTd.textContent = u.username;
+          const levelTd = document.createElement("td");
+          levelTd.textContent = u.level;
           tr.appendChild(idTd);
           tr.appendChild(nameTd);
+          tr.appendChild(levelTd);
           tbody.appendChild(tr);
         });
       } catch (e) {
-        tbody.innerHTML = "<tr><td colspan='2'>Error loading users.</td></tr>";
+        tbody.innerHTML = "<tr><td colspan='3'>Error loading users.</td></tr>";
       }
     }
 

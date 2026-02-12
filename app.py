@@ -6,7 +6,7 @@ from pathlib import Path
 
 import bcrypt
 import jwt
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.routing import APIRouter
 from fastapi.staticfiles import StaticFiles
@@ -37,6 +37,17 @@ def init_db():
         )"""
     )
     conn.commit()
+
+    # Migration: add level column
+    try:
+        conn.execute("ALTER TABLE user ADD COLUMN level INTEGER NOT NULL DEFAULT 1")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    # Ensure matthewtrump is admin
+    conn.execute("UPDATE user SET level = 2 WHERE username = 'matthewtrump'")
+    conn.commit()
     conn.close()
 
 
@@ -48,13 +59,29 @@ init_db()
 USERNAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*$")
 
 
-def create_token(user_id: int, username: str) -> str:
+def create_token(user_id: int, username: str, level: int) -> str:
     payload = {
-        "sub": user_id,
+        "sub": str(user_id),
         "username": username,
+        "level": level,
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def require_admin(authorization: str):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = authorization.split(" ", 1)[1]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if payload.get("level", 1) < 2:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return payload
 
 
 def validate_username(username: str) -> str:
@@ -112,6 +139,7 @@ class UserCreate(BaseModel):
 class UserResponse(BaseModel):
     id: int
     username: str
+    level: int
 
 
 class UserLogin(BaseModel):
@@ -154,7 +182,7 @@ def register(body: UserCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
     conn.close()
-    return {"id": user_id, "username": username}
+    return {"id": user_id, "username": username, "level": 1}
 
 
 @api.post("/login", response_model=TokenResponse)
@@ -162,21 +190,22 @@ def login(body: UserLogin):
     username = body.username.strip().lower()
     conn = get_db()
     row = conn.execute(
-        "SELECT id, username, password_hash FROM user WHERE username = ?", (username,)
+        "SELECT id, username, password_hash, level FROM user WHERE username = ?", (username,)
     ).fetchone()
     conn.close()
 
     if row is None or not bcrypt.checkpw(body.password.encode(), row["password_hash"].encode()):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    token = create_token(row["id"], row["username"])
+    token = create_token(row["id"], row["username"], row["level"])
     return {"token": token}
 
 
 @api.get("/users", response_model=list[UserResponse])
-def list_users():
+def list_users(authorization: str = Header(...)):
+    require_admin(authorization)
     conn = get_db()
-    rows = conn.execute("SELECT id, username FROM user").fetchall()
+    rows = conn.execute("SELECT id, username, level FROM user").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
