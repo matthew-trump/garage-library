@@ -598,6 +598,7 @@
         <p>Your session has ended.</p>
         <div class="form-actions" style="justify-content:center;">
           <button id="btn-goto-home" class="btn-primary">Go to Home</button>
+          <button id="btn-goto-login">Login as Another User</button>
         </div>
       </div>
     </div>
@@ -1033,7 +1034,7 @@
       try {
         const res = await fetch("/api/book", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + getToken() },
           body: JSON.stringify({
             title: addBookTitle.value.trim(),
             author: addBookAuthor.value.trim() || null,
@@ -1233,6 +1234,14 @@
       posDd.textContent = book.position;
       bookDetailDl.appendChild(posDt);
       bookDetailDl.appendChild(posDd);
+
+      const userDt = document.createElement("dt");
+      userDt.textContent = "User ID";
+      const userDd = document.createElement("dd");
+      userDd.dataset.field = "user_id";
+      userDd.textContent = book.user_id != null ? book.user_id : "\u2014";
+      bookDetailDl.appendChild(userDt);
+      bookDetailDl.appendChild(userDd);
     }
 
     function checkBookChanged() {
@@ -1333,7 +1342,7 @@
       try {
         const res = await fetch("/api/book/" + currentBook.id, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + getToken() },
           body: JSON.stringify({
             title: title,
             author: author || null,
@@ -1482,7 +1491,9 @@
       params.set("year", searchYear.checked);
 
       try {
-        const res = await fetch("/api/books/search?" + params.toString());
+        const res = await fetch("/api/books/search?" + params.toString(), {
+          headers: { "Authorization": "Bearer " + getToken() },
+        });
         if (!res.ok) {
           const err = await res.json();
           throw new Error(err.detail || "Search failed");
@@ -1541,6 +1552,14 @@
     searchInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") doSearch();
     });
+
+    function clearSearchResults() {
+      searchInput.value = "";
+      searchResultsTbody.innerHTML = "";
+      searchResultsTable.style.display = "none";
+      searchCount.style.display = "none";
+      searchError.style.display = "none";
+    }
 
     function showSearch() {
       highlightSidebar(null);
@@ -1604,12 +1623,17 @@
     // --- Logout ---
     document.getElementById("btn-logout").addEventListener("click", () => {
       localStorage.removeItem("auth_token");
+      clearSearchResults();
       updateNavAuth();
       navigate("/logged-out");
     });
 
     document.getElementById("btn-goto-home").addEventListener("click", () => {
       navigate("/");
+    });
+
+    document.getElementById("btn-goto-login").addEventListener("click", () => {
+      navigate("/login");
     });
 
     // --- Admin ---

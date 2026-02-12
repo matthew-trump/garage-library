@@ -48,6 +48,17 @@ def init_db():
     # Ensure matthewtrump is admin
     conn.execute("UPDATE user SET level = 2 WHERE username = 'matthewtrump'")
     conn.commit()
+
+    # Migration: add user_id column to book
+    try:
+        conn.execute("ALTER TABLE book ADD COLUMN user_id INTEGER REFERENCES user(id)")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    # Set all existing books to user_id 2
+    conn.execute("UPDATE book SET user_id = 2 WHERE user_id IS NULL")
+    conn.commit()
     conn.close()
 
 
@@ -69,7 +80,7 @@ def create_token(user_id: int, username: str, level: int) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-def require_admin(authorization: str):
+def require_auth(authorization: str):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
     token = authorization.split(" ", 1)[1]
@@ -79,6 +90,11 @@ def require_admin(authorization: str):
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
+
+
+def require_admin(authorization: str):
+    payload = require_auth(authorization)
     if payload.get("level", 1) < 2:
         raise HTTPException(status_code=403, detail="Admin access required")
     return payload
@@ -116,6 +132,7 @@ class Book(BaseModel):
     year: str | None
     stack_id: int
     position: int
+    user_id: int | None
 
 
 class Stack(BaseModel):
@@ -214,7 +231,7 @@ def list_users(authorization: str = Header(...)):
 @api.get("/books", response_model=list[Book])
 def list_books():
     conn = get_db()
-    rows = conn.execute("SELECT id, title, author, publisher, year, stack_id, position FROM book").fetchall()
+    rows = conn.execute("SELECT id, title, author, publisher, year, stack_id, position, user_id FROM book").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -227,6 +244,7 @@ class BookSearchResult(BaseModel):
     year: str | None
     stack_id: int
     stack_name: str
+    user_id: int | None
 
 
 @api.get("/books/search", response_model=list[BookSearchResult])
@@ -236,7 +254,20 @@ def search_books(
     author: bool = Query(True),
     publisher: bool = Query(False),
     year: bool = Query(False),
+    user_id: int | None = Query(None),
+    authorization: str = Header(...),
 ):
+    caller = require_auth(authorization)
+    caller_level = caller.get("level", 1)
+    caller_id = int(caller["sub"])
+
+    # Determine which user_id to filter by
+    if caller_level >= 2:
+        search_user_id = user_id if user_id is not None else caller_id
+    else:
+        # Level 1: always search own books, ignore any user_id param
+        search_user_id = caller_id
+
     if not (title or author or publisher or year):
         raise HTTPException(status_code=400, detail="At least one search field must be selected")
 
@@ -256,9 +287,10 @@ def search_books(
         conditions.append("b.year LIKE ?")
         params.append(f"%{q}%")
 
-    where = " OR ".join(conditions)
+    where = f"({' OR '.join(conditions)}) AND b.user_id = ?"
+    params.append(search_user_id)
     rows = conn.execute(
-        f"SELECT b.id, b.title, b.author, b.publisher, b.year, b.stack_id, s.name as stack_name "
+        f"SELECT b.id, b.title, b.author, b.publisher, b.year, b.stack_id, s.name as stack_name, b.user_id "
         f"FROM book b JOIN stack s ON b.stack_id = s.id "
         f"WHERE {where} ORDER BY b.title",
         params,
@@ -271,7 +303,7 @@ def search_books(
 def get_book(book_id: int):
     conn = get_db()
     row = conn.execute(
-        "SELECT id, title, author, publisher, year, stack_id, position FROM book WHERE id = ?",
+        "SELECT id, title, author, publisher, year, stack_id, position, user_id FROM book WHERE id = ?",
         (book_id,),
     ).fetchone()
     conn.close()
@@ -296,7 +328,7 @@ def get_stack(stack_id: int):
         conn.close()
         raise HTTPException(status_code=404, detail="Stack not found")
     books = conn.execute(
-        "SELECT id, title, author, publisher, year, stack_id, position FROM book WHERE stack_id = ? ORDER BY position",
+        "SELECT id, title, author, publisher, year, stack_id, position, user_id FROM book WHERE stack_id = ? ORDER BY position",
         (stack_id,),
     ).fetchall()
     conn.close()
@@ -342,10 +374,25 @@ class BookCreate(BaseModel):
     year: str | None = None
     stack_id: int
     position: str = "end"  # "beginning" or "end"
+    user_id: int | None = None
 
 
 @api.post("/book", response_model=Book, status_code=201)
-def create_book(body: BookCreate):
+def create_book(body: BookCreate, authorization: str = Header(...)):
+    caller = require_auth(authorization)
+    caller_level = caller.get("level", 1)
+    caller_id = int(caller["sub"])
+
+    # Determine user_id for the new book
+    if caller_level >= 2:
+        # Admin: accept user_id if provided, default to caller
+        book_user_id = body.user_id if body.user_id is not None else caller_id
+    else:
+        # Normal user: must not pass user_id
+        if body.user_id is not None:
+            raise HTTPException(status_code=400, detail="Normal users cannot specify user_id")
+        book_user_id = caller_id
+
     title = body.title.strip()
     if not title:
         raise HTTPException(status_code=400, detail="Title cannot be empty")
@@ -354,6 +401,13 @@ def create_book(body: BookCreate):
         raise HTTPException(status_code=400, detail="position must be 'beginning' or 'end'")
 
     conn = get_db()
+
+    # Validate user_id exists
+    target_user = conn.execute("SELECT id FROM user WHERE id = ?", (book_user_id,)).fetchone()
+    if target_user is None:
+        conn.close()
+        raise HTTPException(status_code=400, detail="User not found")
+
     stack = conn.execute("SELECT id FROM stack WHERE id = ?", (body.stack_id,)).fetchone()
     if stack is None:
         conn.close()
@@ -382,8 +436,8 @@ def create_book(body: BookCreate):
             new_pos = len(existing)
 
         cur = conn.execute(
-            "INSERT INTO book (title, author, publisher, year, stack_id, position) VALUES (?, ?, ?, ?, ?, ?)",
-            (title, body.author, body.publisher, body.year, body.stack_id, new_pos),
+            "INSERT INTO book (title, author, publisher, year, stack_id, position, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (title, body.author, body.publisher, body.year, body.stack_id, new_pos, book_user_id),
         )
         conn.commit()
         book_id = cur.lastrowid
@@ -393,7 +447,7 @@ def create_book(body: BookCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
     row = conn.execute(
-        "SELECT id, title, author, publisher, year, stack_id, position FROM book WHERE id = ?",
+        "SELECT id, title, author, publisher, year, stack_id, position, user_id FROM book WHERE id = ?",
         (book_id,),
     ).fetchone()
     conn.close()
@@ -406,10 +460,24 @@ class BookUpdate(BaseModel):
     publisher: str | None = None
     year: str | None = None
     stack_id: int | None = None
+    user_id: int | None = None
 
 
 @api.put("/book/{book_id}", response_model=Book)
-def update_book(book_id: int, body: BookUpdate):
+def update_book(book_id: int, body: BookUpdate, authorization: str = Header(...)):
+    caller = require_auth(authorization)
+    caller_level = caller.get("level", 1)
+
+    if caller_level < 2 and body.user_id is not None:
+        raise HTTPException(status_code=400, detail="Normal users cannot specify user_id")
+
+    if caller_level >= 2 and body.user_id is not None:
+        conn_check = get_db()
+        target_user = conn_check.execute("SELECT id FROM user WHERE id = ?", (body.user_id,)).fetchone()
+        conn_check.close()
+        if target_user is None:
+            raise HTTPException(status_code=400, detail="User not found")
+
     conn = get_db()
     row = conn.execute(
         "SELECT id, stack_id, position FROM book WHERE id = ?", (book_id,)
@@ -477,15 +545,27 @@ def update_book(book_id: int, body: BookUpdate):
                 )
 
             # Place the book at position 0 with updated fields
-            conn.execute(
-                "UPDATE book SET title = ?, author = ?, publisher = ?, year = ?, position = 0 WHERE id = ?",
-                (body.title.strip(), body.author, body.publisher, body.year, book_id),
-            )
+            if body.user_id is not None:
+                conn.execute(
+                    "UPDATE book SET title = ?, author = ?, publisher = ?, year = ?, position = 0, user_id = ? WHERE id = ?",
+                    (body.title.strip(), body.author, body.publisher, body.year, body.user_id, book_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE book SET title = ?, author = ?, publisher = ?, year = ?, position = 0 WHERE id = ?",
+                    (body.title.strip(), body.author, body.publisher, body.year, book_id),
+                )
         else:
-            conn.execute(
-                "UPDATE book SET title = ?, author = ?, publisher = ?, year = ? WHERE id = ?",
-                (body.title.strip(), body.author, body.publisher, body.year, book_id),
-            )
+            if body.user_id is not None:
+                conn.execute(
+                    "UPDATE book SET title = ?, author = ?, publisher = ?, year = ?, user_id = ? WHERE id = ?",
+                    (body.title.strip(), body.author, body.publisher, body.year, body.user_id, book_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE book SET title = ?, author = ?, publisher = ?, year = ? WHERE id = ?",
+                    (body.title.strip(), body.author, body.publisher, body.year, book_id),
+                )
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -493,7 +573,7 @@ def update_book(book_id: int, body: BookUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
     updated = conn.execute(
-        "SELECT id, title, author, publisher, year, stack_id, position FROM book WHERE id = ?",
+        "SELECT id, title, author, publisher, year, stack_id, position, user_id FROM book WHERE id = ?",
         (book_id,),
     ).fetchone()
     conn.close()
@@ -580,7 +660,7 @@ def reorder_stack(stack_id: int, body: ReorderRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
     books = conn.execute(
-        "SELECT id, title, author, publisher, year, stack_id, position FROM book WHERE stack_id = ? ORDER BY position",
+        "SELECT id, title, author, publisher, year, stack_id, position, user_id FROM book WHERE stack_id = ? ORDER BY position",
         (stack_id,),
     ).fetchall()
     conn.close()
