@@ -522,7 +522,7 @@
   <main id="main">
     <div id="welcome">
       <h1>Garage Library</h1>
-      <p>Select a stack from the sidebar to view its books.</p>
+      <p id="welcome-msg"></p>
     </div>
     <div id="search-view">
       <h1>Search Books</h1>
@@ -591,7 +591,10 @@
         </div>
         <div class="form-group">
           <label for="login-password">Password</label>
-          <input type="password" id="login-password">
+          <div style="display:flex; align-items:center; gap:0.4rem;">
+            <input type="password" id="login-password" style="flex:1;">
+            <button type="button" id="btn-toggle-password" style="background:transparent; border:1px solid #ccc; border-radius:4px; padding:0.35rem 0.5rem; cursor:pointer; font-size:0.8rem;">Show</button>
+          </div>
         </div>
         <div class="form-actions">
           <button id="btn-login" class="btn-primary" disabled>Login</button>
@@ -765,6 +768,11 @@
       try {
         const payload = token.split(".")[1];
         const decoded = JSON.parse(atob(payload));
+        // Check if token has expired
+        if (decoded.exp && decoded.exp * 1000 < Date.now()) {
+          localStorage.removeItem("auth_token");
+          return null;
+        }
         return { sub: decoded.sub, username: decoded.username, level: decoded.level || 1 };
       } catch (e) {
         return null;
@@ -784,6 +792,7 @@
         navbarAdmin.style.display = user.level >= 2 ? "" : "none";
         document.getElementById("navbar-search").style.display = "";
         sidebar.style.display = "";
+        document.getElementById("welcome-msg").textContent = "Select a stack from the sidebar to view its books.";
       } else {
         navbarLogin.style.display = "";
         navbarUser.style.display = "none";
@@ -791,6 +800,7 @@
         navbarAdmin.style.display = "none";
         document.getElementById("navbar-search").style.display = "none";
         sidebar.style.display = "none";
+        document.getElementById("welcome-msg").textContent = "Please log in to access your library.";
       }
     }
 
@@ -1602,6 +1612,17 @@
     loginUsername.addEventListener("input", checkLoginEnabled);
     loginPassword.addEventListener("input", checkLoginEnabled);
 
+    document.getElementById("btn-toggle-password").addEventListener("click", () => {
+      const btn = document.getElementById("btn-toggle-password");
+      if (loginPassword.type === "password") {
+        loginPassword.type = "text";
+        btn.textContent = "Hide";
+      } else {
+        loginPassword.type = "password";
+        btn.textContent = "Show";
+      }
+    });
+
     loginPassword.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !btnLogin.disabled) btnLogin.click();
     });
@@ -1753,6 +1774,17 @@
     });
 
     window.addEventListener("popstate", route);
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        updateNavAuth();
+        if (!getUser()) {
+          stacksCache = null;
+          stackList.innerHTML = "";
+        }
+      }
+    });
+
     route();
   </script>
 </body>
