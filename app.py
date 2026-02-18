@@ -6,6 +6,7 @@ from pathlib import Path
 
 import bcrypt
 import jwt
+import requests as http_requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -709,6 +710,51 @@ def reorder_stack(stack_id: int, body: ReorderRequest):
     ).fetchall()
     conn.close()
     return {"id": stack["id"], "name": stack["name"], "location": stack["location"], "user_id": stack["user_id"], "books": [dict(b) for b in books]}
+
+
+@api.get("/book/{book_id}/openlibrary")
+def search_openlibrary(book_id: int, authorization: str = Header(...)):
+    require_auth(authorization)
+    conn = get_db()
+    row = conn.execute(
+        "SELECT id, title, author FROM book WHERE id = ?", (book_id,)
+    ).fetchone()
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    params = {"limit": 10}
+    if row["title"]:
+        params["title"] = row["title"]
+    if row["author"]:
+        params["author"] = row["author"]
+
+    if len(params) == 1:
+        raise HTTPException(status_code=400, detail="Book has no title or author to search")
+
+    try:
+        resp = http_requests.get(
+            "https://openlibrary.org/search.json",
+            params=params,
+            headers={"User-Agent": "GarageLibrary/1.0 (personal book catalog)"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"OpenLibrary request failed: {e}")
+
+    results = []
+    for doc in data.get("docs", []):
+        results.append({
+            "title": doc.get("title"),
+            "author_name": doc.get("author_name", []),
+            "first_publish_year": doc.get("first_publish_year"),
+            "publisher": doc.get("publisher", []),
+            "edition_count": doc.get("edition_count"),
+            "key": doc.get("key"),
+        })
+    return results
 
 
 app.include_router(api)

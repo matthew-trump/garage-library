@@ -564,6 +564,23 @@
       <div class="book-detail">
         <dl id="book-detail-dl"></dl>
       </div>
+      <button id="btn-openlibrary-search" style="margin-top:1rem; padding:0.4rem 0.85rem; background:#27ae60; color:#fff; border:1px solid #27ae60; border-radius:4px; cursor:pointer; font-size:0.85rem;">Search OpenLibrary</button>
+      <div id="openlibrary-error" class="error-msg" style="margin-top:0.75rem;"></div>
+      <div id="openlibrary-results" style="display:none; margin-top:0.75rem;">
+        <h3 style="margin-bottom:0.5rem; font-size:1rem;">OpenLibrary Results</h3>
+        <table id="openlibrary-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Author</th>
+              <th>Year</th>
+              <th>Publisher</th>
+              <th>Editions</th>
+            </tr>
+          </thead>
+          <tbody id="openlibrary-tbody"></tbody>
+        </table>
+      </div>
     </div>
     <div id="new-stack-view">
       <h1>New Stack</h1>
@@ -1412,11 +1429,84 @@
     });
     btnBookSave.addEventListener("click", saveBook);
 
+    // --- OpenLibrary Search ---
+    const btnOpenLibrary = document.getElementById("btn-openlibrary-search");
+    const openLibraryError = document.getElementById("openlibrary-error");
+    const openLibraryResults = document.getElementById("openlibrary-results");
+    const openLibraryTbody = document.getElementById("openlibrary-tbody");
+
+    function resetOpenLibrary() {
+      openLibraryError.style.display = "none";
+      openLibraryResults.style.display = "none";
+      openLibraryTbody.innerHTML = "";
+      btnOpenLibrary.disabled = false;
+    }
+
+    btnOpenLibrary.addEventListener("click", async () => {
+      if (!currentBook) return;
+      openLibraryError.style.display = "none";
+      openLibraryResults.style.display = "none";
+      openLibraryTbody.innerHTML = "";
+      btnOpenLibrary.disabled = true;
+
+      try {
+        const res = await fetch("/api/book/" + currentBook.id + "/openlibrary", {
+          headers: { "Authorization": "Bearer " + getToken() },
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "OpenLibrary search failed");
+        }
+        const results = await res.json();
+
+        if (results.length === 0) {
+          openLibraryError.textContent = "No results found on OpenLibrary.";
+          openLibraryError.style.display = "block";
+        } else {
+          results.forEach(r => {
+            const tr = document.createElement("tr");
+            const titleTd = document.createElement("td");
+            if (r.key) {
+              const a = document.createElement("a");
+              a.href = "https://openlibrary.org" + r.key;
+              a.target = "_blank";
+              a.rel = "noopener";
+              a.textContent = r.title || "\u2014";
+              titleTd.appendChild(a);
+            } else {
+              titleTd.textContent = r.title || "\u2014";
+            }
+            const authorTd = document.createElement("td");
+            authorTd.textContent = (r.author_name && r.author_name.length) ? r.author_name.join(", ") : "\u2014";
+            const yearTd = document.createElement("td");
+            yearTd.textContent = r.first_publish_year || "\u2014";
+            const pubTd = document.createElement("td");
+            pubTd.textContent = (r.publisher && r.publisher.length) ? r.publisher.slice(0, 3).join(", ") : "\u2014";
+            const edTd = document.createElement("td");
+            edTd.textContent = r.edition_count || "\u2014";
+            tr.appendChild(titleTd);
+            tr.appendChild(authorTd);
+            tr.appendChild(yearTd);
+            tr.appendChild(pubTd);
+            tr.appendChild(edTd);
+            openLibraryTbody.appendChild(tr);
+          });
+          openLibraryResults.style.display = "block";
+        }
+      } catch (e) {
+        openLibraryError.textContent = e.message;
+        openLibraryError.style.display = "block";
+      } finally {
+        btnOpenLibrary.disabled = false;
+      }
+    });
+
     async function showBook(bookId) {
       await loadStacks();
       highlightSidebar(null);
       exitBookEditMode();
       bookSuccessMsg.style.display = "none";
+      resetOpenLibrary();
 
       const res = await fetch("/api/book/" + bookId);
       if (!res.ok) { showView("welcome"); return; }
