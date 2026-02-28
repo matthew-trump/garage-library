@@ -545,6 +545,7 @@
             <th>Author</th>
             <th>Publisher</th>
             <th>Year</th>
+            <th>Edition</th>
             <th>Stack</th>
           </tr>
         </thead>
@@ -552,22 +553,15 @@
       </table>
     </div>
     <div id="book-view">
-      <div class="book-toolbar">
-        <h1 id="book-title"></h1>
-        <button id="btn-book-edit">Edit</button>
-        <button id="btn-book-save" class="btn-save" style="display:none">Save</button>
-        <button id="btn-book-cancel" class="btn-cancel" style="display:none">Cancel</button>
-      </div>
-      <div id="book-error-msg" class="error-msg"></div>
-      <div id="book-success-msg" class="success-msg"></div>
-      <div id="book-info-msg" class="info-msg"></div>
-      <div class="book-detail">
-        <dl id="book-detail-dl"></dl>
-      </div>
-      <button id="btn-openlibrary-search" style="margin-top:1rem; padding:0.4rem 0.85rem; background:#27ae60; color:#fff; border:1px solid #27ae60; border-radius:4px; cursor:pointer; font-size:0.85rem;">Search OpenLibrary</button>
+      <p id="book-back-link" style="margin-bottom:0.5rem;"></p>
+      <h1 id="book-title" style="margin-bottom:0.5rem;"></h1>
+      <button id="btn-openlibrary-search" style="margin-bottom:1rem; padding:0.4rem 0.85rem; background:#27ae60; color:#fff; border:1px solid #27ae60; border-radius:4px; cursor:pointer; font-size:0.85rem;">Search OpenLibrary</button>
       <div id="openlibrary-error" class="error-msg" style="margin-top:0.75rem;"></div>
       <div id="openlibrary-results" style="display:none; margin-top:0.75rem;">
-        <h3 style="margin-bottom:0.5rem; font-size:1rem;">OpenLibrary Results</h3>
+        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+          <h3 style="font-size:1rem;">OpenLibrary Results</h3>
+          <button id="btn-openlibrary-close" style="padding:0.2rem 0.5rem; border:1px solid #ccc; border-radius:4px; background:#fff; cursor:pointer; font-size:0.8rem;">Close</button>
+        </div>
         <table id="openlibrary-table">
           <thead>
             <tr>
@@ -580,6 +574,17 @@
           </thead>
           <tbody id="openlibrary-tbody"></tbody>
         </table>
+      </div>
+      <div id="book-error-msg" class="error-msg"></div>
+      <div id="book-success-msg" class="success-msg"></div>
+      <div id="book-info-msg" class="info-msg"></div>
+      <div class="book-detail">
+        <dl id="book-detail-dl"></dl>
+      </div>
+      <div class="book-toolbar" style="margin-top:1rem;">
+        <button id="btn-book-edit">Edit</button>
+        <button id="btn-book-save" class="btn-save" style="display:none">Save</button>
+        <button id="btn-book-cancel" class="btn-cancel" style="display:none">Cancel</button>
       </div>
     </div>
     <div id="new-stack-view">
@@ -692,6 +697,10 @@
           <div class="form-group">
             <label for="add-book-year">Year</label>
             <input type="text" id="add-book-year">
+          </div>
+          <div class="form-group">
+            <label for="add-book-edition">Edition</label>
+            <input type="text" id="add-book-edition">
           </div>
           <div class="form-group">
             <label for="add-book-position">Add at</label>
@@ -1024,6 +1033,7 @@
     const addBookAuthor = document.getElementById("add-book-author");
     const addBookPublisher = document.getElementById("add-book-publisher");
     const addBookYear = document.getElementById("add-book-year");
+    const addBookEdition = document.getElementById("add-book-edition");
     const addBookPosition = document.getElementById("add-book-position");
     const btnSaveNewBook = document.getElementById("btn-save-new-book");
     const btnCancelNewBook = document.getElementById("btn-cancel-new-book");
@@ -1036,10 +1046,12 @@
       addBookAuthor.value = "";
       addBookPublisher.value = "";
       addBookYear.value = "";
+      addBookEdition.value = "";
       addBookTitle.disabled = false;
       addBookAuthor.disabled = false;
       addBookPublisher.disabled = false;
       addBookYear.disabled = false;
+      addBookEdition.disabled = false;
       addBookPosition.value = "end";
       btnSaveNewBook.disabled = true;
       addBookError.style.display = "none";
@@ -1083,6 +1095,7 @@
             author: addBookAuthor.value.trim() || null,
             publisher: addBookPublisher.value.trim() || null,
             year: addBookYear.value.trim() || null,
+            edition: addBookEdition.value.trim() || null,
             stack_id: Number(currentStackId),
             position: addBookPosition.value,
           }),
@@ -1240,6 +1253,18 @@
       const stack = stacksCache.find(s => s.id === book.stack_id);
       const stackLabel = stack ? stack.name : String(book.stack_id);
 
+      // Back link to stack
+      const backLink = document.getElementById("book-back-link");
+      backLink.innerHTML = "";
+      const a = document.createElement("a");
+      a.href = "/stacks/" + book.stack_id;
+      a.textContent = "\u2190 Stack " + stackLabel;
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        navigate("/stacks/" + book.stack_id);
+      });
+      backLink.appendChild(a);
+
       bookTitle.textContent = book.title;
       bookDetailDl.innerHTML = "";
 
@@ -1248,6 +1273,7 @@
         ["Author", "author", book.author || ""],
         ["Publisher", "publisher", book.publisher || ""],
         ["Year", "year", book.year || ""],
+        ["Edition", "edition", book.edition || ""],
       ];
 
       editableFields.forEach(([label, key, value]) => {
@@ -1259,6 +1285,45 @@
         bookDetailDl.appendChild(dt);
         bookDetailDl.appendChild(dd);
       });
+
+      const statusLabels = ["Available", "Checked Out", "Missing"];
+      const statusDt = document.createElement("dt");
+      statusDt.textContent = "Status";
+      const statusDd = document.createElement("dd");
+      statusDd.dataset.field = "status";
+      statusDd.textContent = statusLabels[book.status] || statusLabels[0];
+      bookDetailDl.appendChild(statusDt);
+      bookDetailDl.appendChild(statusDd);
+
+      const typeLabels = {1: "Hardback", 2: "Paperback"};
+      const typeDt = document.createElement("dt");
+      typeDt.textContent = "Type";
+      const typeDd = document.createElement("dd");
+      typeDd.dataset.field = "type";
+      typeDd.textContent = typeLabels[book.type] || "\u2014";
+      bookDetailDl.appendChild(typeDt);
+      bookDetailDl.appendChild(typeDd);
+
+      const transDt = document.createElement("dt");
+      transDt.textContent = "Translation";
+      const transDd = document.createElement("dd");
+      transDd.dataset.field = "is_translation";
+      transDd.textContent = book.is_translation ? "\u2713" : "";
+      bookDetailDl.appendChild(transDt);
+      bookDetailDl.appendChild(transDd);
+
+      const translatorDt = document.createElement("dt");
+      translatorDt.textContent = "Translator";
+      translatorDt.dataset.field = "translator_label";
+      const translatorDd = document.createElement("dd");
+      translatorDd.dataset.field = "translator";
+      translatorDd.textContent = book.translator || "\u2014";
+      if (!book.is_translation) {
+        translatorDt.style.display = "none";
+        translatorDd.style.display = "none";
+      }
+      bookDetailDl.appendChild(translatorDt);
+      bookDetailDl.appendChild(translatorDd);
 
       const stackDt = document.createElement("dt");
       stackDt.textContent = "Stack";
@@ -1297,15 +1362,26 @@
       const authorInput = bookDetailDl.querySelector('dd[data-field="author"] input');
       const pubInput = bookDetailDl.querySelector('dd[data-field="publisher"] input');
       const yearInput = bookDetailDl.querySelector('dd[data-field="year"] input');
+      const editionInput = bookDetailDl.querySelector('dd[data-field="edition"] input');
+      const statusSelect = bookDetailDl.querySelector('dd[data-field="status"] select');
+      const typeSelect = bookDetailDl.querySelector('dd[data-field="type"] select');
+      const transInput = bookDetailDl.querySelector('dd[data-field="is_translation"] input');
+      const translatorInput = bookDetailDl.querySelector('dd[data-field="translator"] input');
       const stackSelect = bookDetailDl.querySelector('dd[data-field="stack"] select');
 
       const titleChanged = titleInput && titleInput.value !== currentBook.title;
       const authorChanged = authorInput && authorInput.value !== (currentBook.author || "");
       const pubChanged = pubInput && pubInput.value !== (currentBook.publisher || "");
       const yearChanged = yearInput && yearInput.value !== (currentBook.year || "");
+      const editionChanged = editionInput && editionInput.value !== (currentBook.edition || "");
+      const statusChanged = statusSelect && Number(statusSelect.value) !== (currentBook.status || 0);
+      const curType = currentBook.type != null ? currentBook.type : 1;
+      const typeChanged = typeSelect && Number(typeSelect.value) !== curType;
+      const transChanged = transInput && (transInput.checked ? 1 : 0) !== (currentBook.is_translation || 0);
+      const translatorChanged = translatorInput && translatorInput.value !== (currentBook.translator || "");
       const stackChanged = stackSelect && Number(stackSelect.value) !== currentBook.stack_id;
 
-      const changed = titleChanged || authorChanged || pubChanged || yearChanged || stackChanged;
+      const changed = titleChanged || authorChanged || pubChanged || yearChanged || editionChanged || statusChanged || typeChanged || transChanged || translatorChanged || stackChanged;
       btnBookSave.disabled = !changed;
     }
 
@@ -1321,13 +1397,14 @@
       bookInfoMsg.style.display = "none";
       if (successTimer) { clearTimeout(successTimer); successTimer = null; }
 
-      ["title", "author", "publisher", "year"].forEach(key => {
+      ["title", "author", "publisher", "year", "edition"].forEach(key => {
         const dd = bookDetailDl.querySelector('dd[data-field="' + key + '"]');
         if (!dd) return;
         const val = key === "title" ? currentBook.title :
                     key === "author" ? (currentBook.author || "") :
                     key === "publisher" ? (currentBook.publisher || "") :
-                    (currentBook.year || "");
+                    key === "year" ? (currentBook.year || "") :
+                    (currentBook.edition || "");
         const input = document.createElement("input");
         input.type = "text";
         input.name = key;
@@ -1336,6 +1413,78 @@
         dd.textContent = "";
         dd.appendChild(input);
       });
+
+      // Status dropdown
+      const statusDd = bookDetailDl.querySelector('dd[data-field="status"]');
+      if (statusDd) {
+        statusDd.textContent = "";
+        const sel = document.createElement("select");
+        sel.name = "status";
+        [["0", "Available"], ["1", "Checked Out"], ["2", "Missing"]].forEach(([val, label]) => {
+          const opt = document.createElement("option");
+          opt.value = val;
+          opt.textContent = label;
+          if (Number(val) === (currentBook.status || 0)) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        sel.addEventListener("change", checkBookChanged);
+        statusDd.appendChild(sel);
+      }
+
+      // Type dropdown
+      const typeDd = bookDetailDl.querySelector('dd[data-field="type"]');
+      if (typeDd) {
+        typeDd.textContent = "";
+        const sel = document.createElement("select");
+        sel.name = "type";
+        const curType = currentBook.type != null ? currentBook.type : 1;
+        [["1", "Hardback"], ["2", "Paperback"]].forEach(([val, label]) => {
+          const opt = document.createElement("option");
+          opt.value = val;
+          opt.textContent = label;
+          if (Number(val) === curType) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        sel.addEventListener("change", checkBookChanged);
+        typeDd.appendChild(sel);
+      }
+
+      // Translation checkbox
+      const transDd = bookDetailDl.querySelector('dd[data-field="is_translation"]');
+      const translatorDt = bookDetailDl.querySelector('dt[data-field="translator_label"]');
+      const translatorDd = bookDetailDl.querySelector('dd[data-field="translator"]');
+      if (transDd) {
+        transDd.textContent = "";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.name = "is_translation";
+        cb.checked = !!(currentBook.is_translation);
+        cb.addEventListener("change", () => {
+          if (cb.checked) {
+            translatorDt.style.display = "";
+            translatorDd.style.display = "";
+          } else {
+            translatorDt.style.display = "none";
+            translatorDd.style.display = "none";
+          }
+          checkBookChanged();
+        });
+        transDd.appendChild(cb);
+      }
+      if (translatorDd) {
+        const val = currentBook.translator || "";
+        translatorDd.textContent = "";
+        const input = document.createElement("input");
+        input.type = "text";
+        input.name = "translator";
+        input.value = val;
+        input.addEventListener("input", checkBookChanged);
+        translatorDd.appendChild(input);
+        if (!currentBook.is_translation) {
+          translatorDt.style.display = "none";
+          translatorDd.style.display = "none";
+        }
+      }
 
       // Stack dropdown
       const stackDd = bookDetailDl.querySelector('dd[data-field="stack"]');
@@ -1384,6 +1533,16 @@
       const publisher = bookDetailDl.querySelector('dd[data-field="publisher"] input').value;
       const yearInput = bookDetailDl.querySelector('dd[data-field="year"] input');
       const year = yearInput ? yearInput.value : "";
+      const editionInput = bookDetailDl.querySelector('dd[data-field="edition"] input');
+      const edition = editionInput ? editionInput.value : "";
+      const statusSelect = bookDetailDl.querySelector('dd[data-field="status"] select');
+      const status = statusSelect ? Number(statusSelect.value) : (currentBook.status || 0);
+      const typeSelect = bookDetailDl.querySelector('dd[data-field="type"] select');
+      const type = typeSelect ? Number(typeSelect.value) : (currentBook.type != null ? currentBook.type : 1);
+      const transInput = bookDetailDl.querySelector('dd[data-field="is_translation"] input');
+      const isTranslation = transInput && transInput.checked ? 1 : 0;
+      const translatorInput = bookDetailDl.querySelector('dd[data-field="translator"] input');
+      const translator = isTranslation && translatorInput ? (translatorInput.value.trim() || null) : null;
       const stackSelect = bookDetailDl.querySelector('dd[data-field="stack"] select');
       const stackId = stackSelect ? Number(stackSelect.value) : currentBook.stack_id;
 
@@ -1396,6 +1555,11 @@
             author: author || null,
             publisher: publisher || null,
             year: year || null,
+            edition: edition || null,
+            status: status,
+            type: type,
+            is_translation: isTranslation,
+            translator: translator,
             stack_id: stackId,
           }),
         });
@@ -1441,6 +1605,8 @@
       openLibraryTbody.innerHTML = "";
       btnOpenLibrary.disabled = false;
     }
+
+    document.getElementById("btn-openlibrary-close").addEventListener("click", resetOpenLibrary);
 
     btnOpenLibrary.addEventListener("click", async () => {
       if (!currentBook) return;
@@ -1642,6 +1808,8 @@
           pubTd.textContent = book.publisher || "\u2014";
           const yearTd = document.createElement("td");
           yearTd.textContent = book.year || "\u2014";
+          const editionTd = document.createElement("td");
+          editionTd.textContent = book.edition || "\u2014";
           const stackTd = document.createElement("td");
           const stackLink = document.createElement("a");
           stackLink.href = "/stacks/" + book.stack_id;
@@ -1656,6 +1824,7 @@
           tr.appendChild(authorTd);
           tr.appendChild(pubTd);
           tr.appendChild(yearTd);
+          tr.appendChild(editionTd);
           tr.appendChild(stackTd);
           searchResultsTbody.appendChild(tr);
         });

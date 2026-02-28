@@ -18,7 +18,7 @@ load_dotenv(Path(__file__).parent / ".env.local")
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-do-not-use-in-production")
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRY_HOURS = 24
+JWT_EXPIRY_SECONDS = int(os.environ.get("JWT_EXPIRY_SECONDS", 86400))
 
 DB_PATH = Path(__file__).parent / "garage-library.db"
 DATABASE_BACKUP_DIRECTORY = os.environ.get("DATABASE_BACKUP_DIRECTORY")
@@ -76,6 +76,40 @@ def init_db():
     # Set all existing stacks to user_id 2
     conn.execute("UPDATE stack SET user_id = 2 WHERE user_id IS NULL")
     conn.commit()
+
+    # Migration: add edition column to book
+    try:
+        conn.execute("ALTER TABLE book ADD COLUMN edition TEXT")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    # Migration: add status column to book
+    try:
+        conn.execute("ALTER TABLE book ADD COLUMN status INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    # Migration: add type column to book
+    try:
+        conn.execute("ALTER TABLE book ADD COLUMN type INTEGER")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    # Migration: add is_translation and translator columns to book
+    try:
+        conn.execute("ALTER TABLE book ADD COLUMN is_translation INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE book ADD COLUMN translator TEXT")
+        conn.commit()
+    except Exception:
+        pass
+
     conn.close()
 
 
@@ -92,7 +126,7 @@ def create_token(user_id: int, username: str, level: int) -> str:
         "sub": str(user_id),
         "username": username,
         "level": level,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+        "exp": datetime.now(timezone.utc) + timedelta(seconds=JWT_EXPIRY_SECONDS),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
@@ -147,6 +181,11 @@ class Book(BaseModel):
     author: str | None
     publisher: str | None
     year: str | None
+    edition: str | None
+    status: int
+    type: int | None
+    is_translation: int
+    translator: str | None
     stack_id: int
     position: int
     user_id: int | None
@@ -253,7 +292,7 @@ def list_users(authorization: str = Header(...)):
 @api.get("/books", response_model=list[Book])
 def list_books():
     conn = get_db()
-    rows = conn.execute("SELECT id, title, author, publisher, year, stack_id, position, user_id FROM book").fetchall()
+    rows = conn.execute("SELECT id, title, author, publisher, year, edition, status, type, is_translation, translator, stack_id, position, user_id FROM book").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -264,6 +303,11 @@ class BookSearchResult(BaseModel):
     author: str | None
     publisher: str | None
     year: str | None
+    edition: str | None
+    status: int
+    type: int | None
+    is_translation: int
+    translator: str | None
     stack_id: int
     stack_name: str
     user_id: int | None
@@ -312,7 +356,7 @@ def search_books(
     where = f"({' OR '.join(conditions)}) AND b.user_id = ?"
     params.append(search_user_id)
     rows = conn.execute(
-        f"SELECT b.id, b.title, b.author, b.publisher, b.year, b.stack_id, s.name as stack_name, b.user_id "
+        f"SELECT b.id, b.title, b.author, b.publisher, b.year, b.edition, b.status, b.type, b.is_translation, b.translator, b.stack_id, s.name as stack_name, b.user_id "
         f"FROM book b JOIN stack s ON b.stack_id = s.id "
         f"WHERE {where} ORDER BY b.title",
         params,
@@ -325,7 +369,7 @@ def search_books(
 def get_book(book_id: int):
     conn = get_db()
     row = conn.execute(
-        "SELECT id, title, author, publisher, year, stack_id, position, user_id FROM book WHERE id = ?",
+        "SELECT id, title, author, publisher, year, edition, status, type, is_translation, translator, stack_id, position, user_id FROM book WHERE id = ?",
         (book_id,),
     ).fetchone()
     conn.close()
@@ -354,7 +398,7 @@ def get_stack(stack_id: int, authorization: str = Header(...)):
         conn.close()
         raise HTTPException(status_code=404, detail="Stack not found")
     books = conn.execute(
-        "SELECT id, title, author, publisher, year, stack_id, position, user_id FROM book WHERE stack_id = ? ORDER BY position",
+        "SELECT id, title, author, publisher, year, edition, status, type, is_translation, translator, stack_id, position, user_id FROM book WHERE stack_id = ? ORDER BY position",
         (stack_id,),
     ).fetchall()
     conn.close()
@@ -417,6 +461,11 @@ class BookCreate(BaseModel):
     author: str | None = None
     publisher: str | None = None
     year: str | None = None
+    edition: str | None = None
+    status: int = 0
+    type: int = 1
+    is_translation: int = 0
+    translator: str | None = None
     stack_id: int
     position: str = "end"  # "beginning" or "end"
     user_id: int | None = None
@@ -481,8 +530,8 @@ def create_book(body: BookCreate, authorization: str = Header(...)):
             new_pos = len(existing)
 
         cur = conn.execute(
-            "INSERT INTO book (title, author, publisher, year, stack_id, position, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (title, body.author, body.publisher, body.year, body.stack_id, new_pos, book_user_id),
+            "INSERT INTO book (title, author, publisher, year, edition, status, type, is_translation, translator, stack_id, position, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (title, body.author, body.publisher, body.year, body.edition, body.status, body.type, body.is_translation, body.translator, body.stack_id, new_pos, book_user_id),
         )
         conn.commit()
         book_id = cur.lastrowid
@@ -492,7 +541,7 @@ def create_book(body: BookCreate, authorization: str = Header(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
     row = conn.execute(
-        "SELECT id, title, author, publisher, year, stack_id, position, user_id FROM book WHERE id = ?",
+        "SELECT id, title, author, publisher, year, edition, status, type, is_translation, translator, stack_id, position, user_id FROM book WHERE id = ?",
         (book_id,),
     ).fetchone()
     conn.close()
@@ -504,6 +553,11 @@ class BookUpdate(BaseModel):
     author: str | None = None
     publisher: str | None = None
     year: str | None = None
+    edition: str | None = None
+    status: int = 0
+    type: int | None = None
+    is_translation: int = 0
+    translator: str | None = None
     stack_id: int | None = None
     user_id: int | None = None
 
@@ -592,24 +646,24 @@ def update_book(book_id: int, body: BookUpdate, authorization: str = Header(...)
             # Place the book at position 0 with updated fields
             if body.user_id is not None:
                 conn.execute(
-                    "UPDATE book SET title = ?, author = ?, publisher = ?, year = ?, position = 0, user_id = ? WHERE id = ?",
-                    (body.title.strip(), body.author, body.publisher, body.year, body.user_id, book_id),
+                    "UPDATE book SET title = ?, author = ?, publisher = ?, year = ?, edition = ?, status = ?, type = ?, is_translation = ?, translator = ?, position = 0, user_id = ? WHERE id = ?",
+                    (body.title.strip(), body.author, body.publisher, body.year, body.edition, body.status, body.type, body.is_translation, body.translator, body.user_id, book_id),
                 )
             else:
                 conn.execute(
-                    "UPDATE book SET title = ?, author = ?, publisher = ?, year = ?, position = 0 WHERE id = ?",
-                    (body.title.strip(), body.author, body.publisher, body.year, book_id),
+                    "UPDATE book SET title = ?, author = ?, publisher = ?, year = ?, edition = ?, status = ?, type = ?, is_translation = ?, translator = ?, position = 0 WHERE id = ?",
+                    (body.title.strip(), body.author, body.publisher, body.year, body.edition, body.status, body.type, body.is_translation, body.translator, book_id),
                 )
         else:
             if body.user_id is not None:
                 conn.execute(
-                    "UPDATE book SET title = ?, author = ?, publisher = ?, year = ?, user_id = ? WHERE id = ?",
-                    (body.title.strip(), body.author, body.publisher, body.year, body.user_id, book_id),
+                    "UPDATE book SET title = ?, author = ?, publisher = ?, year = ?, edition = ?, status = ?, type = ?, is_translation = ?, translator = ?, user_id = ? WHERE id = ?",
+                    (body.title.strip(), body.author, body.publisher, body.year, body.edition, body.status, body.type, body.is_translation, body.translator, body.user_id, book_id),
                 )
             else:
                 conn.execute(
-                    "UPDATE book SET title = ?, author = ?, publisher = ?, year = ? WHERE id = ?",
-                    (body.title.strip(), body.author, body.publisher, body.year, book_id),
+                    "UPDATE book SET title = ?, author = ?, publisher = ?, year = ?, edition = ?, status = ?, type = ?, is_translation = ?, translator = ? WHERE id = ?",
+                    (body.title.strip(), body.author, body.publisher, body.year, body.edition, body.status, body.type, body.is_translation, body.translator, book_id),
                 )
         conn.commit()
     except Exception as e:
@@ -618,7 +672,7 @@ def update_book(book_id: int, body: BookUpdate, authorization: str = Header(...)
         raise HTTPException(status_code=500, detail=str(e))
 
     updated = conn.execute(
-        "SELECT id, title, author, publisher, year, stack_id, position, user_id FROM book WHERE id = ?",
+        "SELECT id, title, author, publisher, year, edition, status, type, is_translation, translator, stack_id, position, user_id FROM book WHERE id = ?",
         (book_id,),
     ).fetchone()
     conn.close()
@@ -705,7 +759,7 @@ def reorder_stack(stack_id: int, body: ReorderRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
     books = conn.execute(
-        "SELECT id, title, author, publisher, year, stack_id, position, user_id FROM book WHERE stack_id = ? ORDER BY position",
+        "SELECT id, title, author, publisher, year, edition, status, type, is_translation, translator, stack_id, position, user_id FROM book WHERE stack_id = ? ORDER BY position",
         (stack_id,),
     ).fetchall()
     conn.close()
