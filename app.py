@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,7 +15,7 @@ from fastapi.routing import APIRouter
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-load_dotenv(Path(__file__).parent / ".env.local")
+load_dotenv(Path(__file__).parent / ".env")
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-do-not-use-in-production")
 JWT_ALGORITHM = "HS256"
@@ -809,6 +810,25 @@ def search_openlibrary(book_id: int, authorization: str = Header(...)):
             "key": doc.get("key"),
         })
     return results
+
+
+@api.post("/backup")
+def backup_db(authorization: str = Header(...)):
+    require_admin(authorization)
+    backup_dir = os.environ.get("DATABASE_BACKUP_DIRECTORY", "")
+    if not backup_dir:
+        raise HTTPException(status_code=500, detail="DATABASE_BACKUP_DIRECTORY is not set in .env")
+    if not DB_PATH.exists():
+        raise HTTPException(status_code=500, detail=f"Source database not found: {DB_PATH}")
+    dest_dir = Path(backup_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = dest_dir / f"garage-library_{timestamp}.db"
+    try:
+        shutil.copy2(DB_PATH, dest)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Backup failed: {e}")
+    return {"path": str(dest)}
 
 
 app.include_router(api)

@@ -523,6 +523,10 @@
     <div id="welcome">
       <h1>Garage Library</h1>
       <p id="welcome-msg"></p>
+      <div id="backup-section" style="display:none; margin-top:1.5rem;">
+        <button id="btn-backup">Backup Database</button>
+        <p id="backup-status" style="margin-top:0.5rem; font-size:0.9rem;"></p>
+      </div>
     </div>
     <div id="search-view">
       <h1>Search Books</h1>
@@ -819,6 +823,7 @@
         document.getElementById("navbar-search").style.display = "";
         sidebar.style.display = "";
         document.getElementById("welcome-msg").textContent = "Select a stack from the sidebar to view its books.";
+        document.getElementById("backup-section").style.display = user.level >= 2 ? "" : "none";
       } else {
         navbarLogin.style.display = "";
         navbarUser.style.display = "none";
@@ -827,6 +832,7 @@
         document.getElementById("navbar-search").style.display = "none";
         sidebar.style.display = "none";
         document.getElementById("welcome-msg").textContent = "Please log in to access your library.";
+        document.getElementById("backup-section").style.display = "none";
       }
     }
 
@@ -1979,6 +1985,33 @@
         tbody.innerHTML = "<tr><td colspan='3'>Error loading users.</td></tr>";
       }
     }
+
+    document.getElementById("btn-backup").addEventListener("click", async () => {
+      const btn = document.getElementById("btn-backup");
+      const status = document.getElementById("backup-status");
+      btn.disabled = true;
+      status.textContent = "Running backup...";
+      status.style.color = "#666";
+      try {
+        const res = await fetch("/api/backup", {
+          method: "POST",
+          headers: { "Authorization": "Bearer " + getToken() },
+        });
+        const data = await res.json();
+        if (res.ok) {
+          status.textContent = "Backup saved to: " + data.path;
+          status.style.color = "green";
+        } else {
+          status.textContent = "Error: " + (data.detail || "Unknown error");
+          status.style.color = "red";
+        }
+      } catch (e) {
+        status.textContent = "Error: " + e.message;
+        status.style.color = "red";
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
     document.getElementById("navbar-admin").addEventListener("click", (e) => {
       e.preventDefault();

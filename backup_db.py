@@ -9,7 +9,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent / ".env.local")
+load_dotenv(Path(__file__).parent / ".env")
 
 SRC = Path(__file__).parent / "garage-library.db"
 DEST_DIR = Path(os.environ.get("DATABASE_BACKUP_DIRECTORY", ""))
@@ -17,7 +17,7 @@ DEST_DIR = Path(os.environ.get("DATABASE_BACKUP_DIRECTORY", ""))
 
 def main():
     if not os.environ.get("DATABASE_BACKUP_DIRECTORY"):
-        print("Error: DATABASE_BACKUP_DIRECTORY not set in .env.local", file=sys.stderr)
+        print("Error: DATABASE_BACKUP_DIRECTORY not set in .env", file=sys.stderr)
         sys.exit(1)
 
     if not SRC.exists():
