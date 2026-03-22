@@ -523,10 +523,6 @@
     <div id="welcome">
       <h1>Garage Library</h1>
       <p id="welcome-msg"></p>
-      <div id="backup-section" style="display:none; margin-top:1.5rem;">
-        <button id="btn-backup">Backup Database</button>
-        <p id="backup-status" style="margin-top:0.5rem; font-size:0.9rem;"></p>
-      </div>
     </div>
     <div id="search-view">
       <h1>Search Books</h1>
@@ -640,6 +636,10 @@
     <div id="admin-view">
       <h1>Admin</h1>
       <p><a href="/admin/users" id="admin-users-link">View Users</a></p>
+      <div style="margin-top:1.5rem;">
+        <button id="btn-backup">Backup Database</button>
+        <p id="backup-status" style="margin-top:0.5rem; font-size:0.9rem;"></p>
+      </div>
     </div>
     <div id="users-view">
       <h1>Users</h1>
@@ -823,7 +823,6 @@
         document.getElementById("navbar-search").style.display = "";
         sidebar.style.display = "";
         document.getElementById("welcome-msg").textContent = "Select a stack from the sidebar to view its books.";
-        document.getElementById("backup-section").style.display = user.level >= 2 ? "" : "none";
       } else {
         navbarLogin.style.display = "";
         navbarUser.style.display = "none";
@@ -832,7 +831,6 @@
         document.getElementById("navbar-search").style.display = "none";
         sidebar.style.display = "none";
         document.getElementById("welcome-msg").textContent = "Please log in to access your library.";
-        document.getElementById("backup-section").style.display = "none";
       }
     }
 
@@ -1331,6 +1329,14 @@
       bookDetailDl.appendChild(translatorDt);
       bookDetailDl.appendChild(translatorDd);
 
+      const specialDt = document.createElement("dt");
+      specialDt.textContent = "Special Collection";
+      const specialDd = document.createElement("dd");
+      specialDd.dataset.field = "special_collection";
+      specialDd.textContent = book.special_collection ? "\u2713" : "";
+      bookDetailDl.appendChild(specialDt);
+      bookDetailDl.appendChild(specialDd);
+
       const stackDt = document.createElement("dt");
       stackDt.textContent = "Stack";
       const stackDd = document.createElement("dd");
@@ -1385,9 +1391,11 @@
       const typeChanged = typeSelect && Number(typeSelect.value) !== curType;
       const transChanged = transInput && (transInput.checked ? 1 : 0) !== (currentBook.is_translation || 0);
       const translatorChanged = translatorInput && translatorInput.value !== (currentBook.translator || "");
+      const specialInput = bookDetailDl.querySelector('dd[data-field="special_collection"] input');
+      const specialChanged = specialInput && (specialInput.checked ? 1 : 0) !== (currentBook.special_collection || 0);
       const stackChanged = stackSelect && Number(stackSelect.value) !== currentBook.stack_id;
 
-      const changed = titleChanged || authorChanged || pubChanged || yearChanged || editionChanged || statusChanged || typeChanged || transChanged || translatorChanged || stackChanged;
+      const changed = titleChanged || authorChanged || pubChanged || yearChanged || editionChanged || statusChanged || typeChanged || transChanged || translatorChanged || specialChanged || stackChanged;
       btnBookSave.disabled = !changed;
     }
 
@@ -1492,6 +1500,18 @@
         }
       }
 
+      // Special Collection checkbox
+      const specialDd = bookDetailDl.querySelector('dd[data-field="special_collection"]');
+      if (specialDd) {
+        specialDd.textContent = "";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.name = "special_collection";
+        cb.checked = !!(currentBook.special_collection);
+        cb.addEventListener("change", checkBookChanged);
+        specialDd.appendChild(cb);
+      }
+
       // Stack dropdown
       const stackDd = bookDetailDl.querySelector('dd[data-field="stack"]');
       if (stackDd) {
@@ -1549,6 +1569,8 @@
       const isTranslation = transInput && transInput.checked ? 1 : 0;
       const translatorInput = bookDetailDl.querySelector('dd[data-field="translator"] input');
       const translator = isTranslation && translatorInput ? (translatorInput.value.trim() || null) : null;
+      const specialInput = bookDetailDl.querySelector('dd[data-field="special_collection"] input');
+      const specialCollection = specialInput && specialInput.checked ? 1 : 0;
       const stackSelect = bookDetailDl.querySelector('dd[data-field="stack"] select');
       const stackId = stackSelect ? Number(stackSelect.value) : currentBook.stack_id;
 
@@ -1566,6 +1588,7 @@
             type: type,
             is_translation: isTranslation,
             translator: translator,
+            special_collection: specialCollection,
             stack_id: stackId,
           }),
         });
