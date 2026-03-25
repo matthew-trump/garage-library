@@ -726,6 +726,7 @@
             <th>Title</th>
             <th>Author</th>
             <th>Publisher</th>
+            <th>Lang</th>
           </tr>
         </thead>
         <tbody id="book-tbody"></tbody>
@@ -902,11 +903,14 @@
         authorTd.textContent = book.author || "\u2014";
         const pubTd = document.createElement("td");
         pubTd.textContent = book.publisher || "\u2014";
+        const langTd = document.createElement("td");
+        langTd.textContent = book.language || "en";
 
         tr.appendChild(posTd);
         tr.appendChild(titleTd);
         tr.appendChild(authorTd);
         tr.appendChild(pubTd);
+        tr.appendChild(langTd);
         bookTbody.appendChild(tr);
       });
     }
@@ -1337,6 +1341,14 @@
       bookDetailDl.appendChild(specialDt);
       bookDetailDl.appendChild(specialDd);
 
+      const langDt = document.createElement("dt");
+      langDt.textContent = "Language";
+      const langDd = document.createElement("dd");
+      langDd.dataset.field = "language";
+      langDd.textContent = book.language || "en";
+      bookDetailDl.appendChild(langDt);
+      bookDetailDl.appendChild(langDd);
+
       const stackDt = document.createElement("dt");
       stackDt.textContent = "Stack";
       const stackDd = document.createElement("dd");
@@ -1393,9 +1405,11 @@
       const translatorChanged = translatorInput && translatorInput.value !== (currentBook.translator || "");
       const specialInput = bookDetailDl.querySelector('dd[data-field="special_collection"] input');
       const specialChanged = specialInput && (specialInput.checked ? 1 : 0) !== (currentBook.special_collection || 0);
+      const langInput = bookDetailDl.querySelector('dd[data-field="language"] input');
+      const langChanged = langInput && langInput.value !== (currentBook.language || "en");
       const stackChanged = stackSelect && Number(stackSelect.value) !== currentBook.stack_id;
 
-      const changed = titleChanged || authorChanged || pubChanged || yearChanged || editionChanged || statusChanged || typeChanged || transChanged || translatorChanged || specialChanged || stackChanged;
+      const changed = titleChanged || authorChanged || pubChanged || yearChanged || editionChanged || statusChanged || typeChanged || transChanged || translatorChanged || specialChanged || langChanged || stackChanged;
       btnBookSave.disabled = !changed;
     }
 
@@ -1512,6 +1526,19 @@
         specialDd.appendChild(cb);
       }
 
+      // Language input
+      const langDd = bookDetailDl.querySelector('dd[data-field="language"]');
+      if (langDd) {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.name = "language";
+        input.value = currentBook.language || "en";
+        input.style.width = "4rem";
+        input.addEventListener("input", checkBookChanged);
+        langDd.textContent = "";
+        langDd.appendChild(input);
+      }
+
       // Stack dropdown
       const stackDd = bookDetailDl.querySelector('dd[data-field="stack"]');
       if (stackDd) {
@@ -1571,6 +1598,8 @@
       const translator = isTranslation && translatorInput ? (translatorInput.value.trim() || null) : null;
       const specialInput = bookDetailDl.querySelector('dd[data-field="special_collection"] input');
       const specialCollection = specialInput && specialInput.checked ? 1 : 0;
+      const langInput = bookDetailDl.querySelector('dd[data-field="language"] input');
+      const language = langInput ? (langInput.value.trim() || "en") : (currentBook.language || "en");
       const stackSelect = bookDetailDl.querySelector('dd[data-field="stack"] select');
       const stackId = stackSelect ? Number(stackSelect.value) : currentBook.stack_id;
 
@@ -1589,6 +1618,7 @@
             is_translation: isTranslation,
             translator: translator,
             special_collection: specialCollection,
+            language: language,
             stack_id: stackId,
           }),
         });
